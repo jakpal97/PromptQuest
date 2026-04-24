@@ -29,6 +29,7 @@ export default function BattlePage() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [blindAnswer, setBlindAnswer] = useState(null);
   const [moduleLevels, setModuleLevels] = useState([]);
+  const [bestScores, setBestScores] = useState({});
 
   const textareaRef = useRef(null);
 
@@ -60,6 +61,13 @@ export default function BattlePage() {
     if (allLevelsRes.ok) {
       const { levels: allLevels } = await allLevelsRes.json();
       setModuleLevels(allLevels || []);
+    }
+
+    // Załaduj wyniki gracza dla tego modułu
+    const scoresRes = await fetch(`/api/battles?playerId=${playerId}&moduleId=${levelData.module_id}`);
+    if (scoresRes.ok) {
+      const { bestScores: scores } = await scoresRes.json();
+      setBestScores(scores || {});
     }
 
     if (playerRes.ok) {
@@ -256,39 +264,115 @@ export default function BattlePage() {
         </Overlay>
       )}
 
-      {/* GÓRNY PASEK HP */}
+      {/* ===== GÓRNY PASEK ===== */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
-        background: 'rgba(8,8,20,0.95)',
+        background: 'rgba(6,5,18,0.98)',
         borderBottom: '2px solid var(--border)',
-        padding: '8px 20px',
-        display: 'flex', alignItems: 'center', gap: 12,
-        backdropFilter: 'blur(4px)',
+        backdropFilter: 'blur(6px)',
       }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--green)' }}>{player?.display_name || 'TY'}</span>
-            <div style={{ display: 'flex', gap: 3 }}>
-              {[0, 1, 2].map(i => <span key={i} style={{ fontSize: 14, opacity: i < lives ? 1 : 0.2 }}>❤️</span>)}
+        {/* WIERSZ 1 — przycisk mapy + HP + VS + HP */}
+        <div style={{ display: 'flex', alignItems: 'stretch', height: 44 }}>
+
+          {/* ← MAPA */}
+          <button
+            onClick={() => router.push('/map')}
+            style={{
+              background: 'rgba(30,20,60,0.95)', borderRight: '1px solid var(--border)',
+              color: 'var(--muted)', fontFamily: "'Press Start 2P'", fontSize: 6,
+              padding: '0 12px', cursor: 'pointer', flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 5,
+              transition: 'color 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--white)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+          >← MAPA</button>
+
+          {/* HP gracza */}
+          <div style={{ flex: 1, padding: '7px 14px 7px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--green)' }}>{player?.display_name || 'TY'}</span>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {[0,1,2].map(i => <span key={i} style={{ fontSize: 12, opacity: i < lives ? 1 : 0.15, filter: i < lives ? 'none' : 'grayscale(1)' }}>❤️</span>)}
+              </div>
             </div>
+            <div className="hp-bar"><div className="hp-fill hp-fill-player" style={{ width: `${playerHp}%` }} /></div>
           </div>
-          <div className="hp-bar"><div className="hp-fill hp-fill-player" style={{ width: `${playerHp}%` }} /></div>
-        </div>
-        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--gold)', padding: '0 16px' }}>VS</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={{ display: 'flex', gap: 3 }}>
-              {[0, 1, 2].map(i => <span key={i} style={{ fontSize: 14 }}>❤️</span>)}
+
+          {/* VS */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', flexShrink: 0 }}>
+            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 9, color: 'var(--gold)', textShadow: '0 0 10px rgba(247,200,79,0.6)' }}>VS</span>
+          </div>
+
+          {/* HP szefa */}
+          <div style={{ flex: 1, padding: '7px 10px 7px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {[0,1,2].map(i => <span key={i} style={{ fontSize: 12 }}>❤️</span>)}
+              </div>
+              <span style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--red)' }}>{module?.boss_name}</span>
             </div>
-            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--red)' }}>{module?.boss_name}</span>
+            <div className="hp-bar"><div className="hp-fill hp-fill-boss" style={{ width: `${bossHp}%` }} /></div>
           </div>
-          <div className="hp-bar"><div className="hp-fill hp-fill-boss" style={{ width: `${bossHp}%` }} /></div>
         </div>
+
+        {/* WIERSZ 2 — postęp zadań (kółka) */}
+        {moduleLevels.length > 0 && (
+          <div style={{
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            padding: '5px 14px 6px',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 5, color: 'var(--muted)', flexShrink: 0 }}>
+              {module?.title}
+            </span>
+
+            <div style={{ display: 'flex', gap: 5, flex: 1, justifyContent: 'center' }}>
+              {moduleLevels.map((lvl, idx) => {
+                const isCurrent = lvl.id === parseInt(levelId);
+                const score = bestScores[lvl.id];
+                const isDone = score !== undefined && score >= 40;
+                const isPerfect = score !== undefined && score >= 70;
+
+                let dotBg = 'rgba(255,255,255,0.07)';
+                let dotBorder = 'rgba(255,255,255,0.12)';
+                let dotColor = 'rgba(255,255,255,0.3)';
+                let dotShadow = 'none';
+                if (isCurrent) { dotBg = 'var(--accent)'; dotBorder = 'var(--accent)'; dotColor = '#fff'; dotShadow = '0 0 10px rgba(79,142,247,0.8)'; }
+                else if (isPerfect) { dotBg = 'var(--green)'; dotBorder = 'var(--green)'; dotColor = '#fff'; }
+                else if (isDone) { dotBg = '#2a5c30'; dotBorder = 'var(--green)'; dotColor = 'var(--green)'; }
+
+                return (
+                  <div key={lvl.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <div style={{
+                      width: 22, height: 22,
+                      background: dotBg,
+                      border: `1.5px solid ${dotBorder}`,
+                      borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: dotShadow,
+                      fontFamily: "'Press Start 2P'", fontSize: 6, color: dotColor,
+                    }}>
+                      {isDone && !isCurrent ? '✓' : lvl.level_number}
+                    </div>
+                    {isCurrent && (
+                      <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 4px var(--accent)' }} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 5, color: 'var(--muted)', flexShrink: 0 }}>
+              {Object.values(bestScores).filter(s => s >= 40).length}/{moduleLevels.length}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* ===== LEWY PANEL — ciemny, wyraźny, przezroczysty ===== */}
+      {/* ===== LEWY PANEL ===== */}
       <div style={{
-        position: 'absolute', top: 56, left: 0, bottom: 0,
+        position: 'absolute', top: moduleLevels.length > 0 ? 92 : 44, left: 0, bottom: 0,
         width: 'clamp(280px, 32%, 400px)',
         zIndex: 30,
         display: 'flex', flexDirection: 'column',
@@ -363,7 +447,7 @@ export default function BattlePage() {
                 ref={textareaRef}
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
-                placeholder="Wpisz swój prompt tutaj...&#10;(Ctrl+Enter = Testuj)"
+                placeholder="Wpisz swój prompt tutaj... (Ctrl+Enter = ATAKUJ)"
                 rows={5}
                 style={{
                   width: '100%',
@@ -504,7 +588,7 @@ export default function BattlePage() {
 
       {/* ===== GRACZ — większy sprite ===== */}
       <div style={{
-        position: 'absolute', bottom: '14%', left: '34%',
+        position: 'absolute', bottom: '20%', left: '34%',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         animation: shakeTarget === 'player' ? 'shake 0.6s ease-out' : 'none',
         zIndex: 10,
