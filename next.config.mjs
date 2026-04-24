@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
+  images: {
+    unoptimized: true,
+  },
+  serverExternalPackages: ['bcryptjs'],
 };
 
 export default nextConfig;

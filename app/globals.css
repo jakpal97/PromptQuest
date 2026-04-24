@@ -1,26 +1,227 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0a0a1a;
+  --bg2: #12122a;
+  --panel: #1a1a3a;
+  --border: #2a2a5a;
+  --accent: #4f8ef7;
+  --accent2: #f74f8e;
+  --gold: #f7c94f;
+  --green: #4ff7a0;
+  --red: #f74f4f;
+  --white: #e8e8ff;
+  --muted: #6868a0;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html, body {
+  background: var(--bg);
+  color: var(--white);
+  font-family: 'Rajdhani', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ===================== PIXEL ART ===================== */
+.pixel-art {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ===================== SPRITE ANIMATIONS ===================== */
+/* Poprawna animacja: from→to + steps(3) = dokładnie 3 klatki bez "karuzeli" */
+
+@keyframes walk-sprite-2x  { from { background-position: 0 0; } to { background-position: -96px  0; } }
+@keyframes walk-sprite-3x  { from { background-position: 0 0; } to { background-position: -144px 0; } }
+@keyframes walk-sprite-4x  { from { background-position: 0 0; } to { background-position: -192px 0; } }
+@keyframes walk-sprite-5x  { from { background-position: 0 0; } to { background-position: -240px 0; } }
+@keyframes walk-sprite-6x  { from { background-position: 0 0; } to { background-position: -288px 0; } }
+@keyframes walk-sprite-8x  { from { background-position: 0 0; } to { background-position: -384px 0; } }
+@keyframes walk-sprite-10x { from { background-position: 0 0; } to { background-position: -480px 0; } }
+
+/* Aliasy dla kompatybilności */
+@keyframes walk-down-2x  { from { background-position: 0 0; } to { background-position: -96px  0; } }
+@keyframes walk-down-3x  { from { background-position: 0 0; } to { background-position: -144px 0; } }
+@keyframes walk-down-4x  { from { background-position: 0 0; } to { background-position: -192px 0; } }
+@keyframes walk-down-6x  { from { background-position: 0 0; } to { background-position: -288px 0; } }
+
+/* ===================== MAP NODES ===================== */
+@keyframes pulse-node {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(79, 142, 247, 0.8);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(79, 142, 247, 1);
+    transform: scale(1.1);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes pulse-node-gold {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(247, 201, 79, 0.8);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(247, 201, 79, 1);
+    transform: scale(1.1);
+  }
+}
+
+/* ===================== BATTLE ANIMATIONS ===================== */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%       { transform: translateX(-8px) rotate(-2deg); }
+  20%       { transform: translateX(8px) rotate(2deg); }
+  30%       { transform: translateX(-8px) rotate(-2deg); }
+  40%       { transform: translateX(8px) rotate(2deg); }
+  50%       { transform: translateX(-4px); }
+  60%       { transform: translateX(4px); }
+  70%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+  90%       { transform: translateX(-2px); }
+}
+
+@keyframes shake-boss {
+  0%, 100% { transform: scaleX(-1) translateX(0); }
+  10%       { transform: scaleX(-1) translateX(-8px) rotate(-2deg); }
+  20%       { transform: scaleX(-1) translateX(8px) rotate(2deg); }
+  30%       { transform: scaleX(-1) translateX(-8px) rotate(-2deg); }
+  40%       { transform: scaleX(-1) translateX(8px) rotate(2deg); }
+  50%       { transform: scaleX(-1) translateX(-4px); }
+  70%       { transform: scaleX(-1) translateX(4px); }
+  90%       { transform: scaleX(-1) translateX(-2px); }
+}
+
+@keyframes projectile-right {
+  0%   { left: 15%; opacity: 1; transform: scale(1); }
+  100% { left: 80%; opacity: 0; transform: scale(0.5); }
+}
+
+@keyframes projectile-left {
+  0%   { left: 80%; opacity: 1; transform: scale(1); }
+  100% { left: 15%; opacity: 0; transform: scale(0.5); }
+}
+
+@keyframes flash-red {
+  0%, 100% { filter: brightness(1); }
+  50%       { filter: brightness(2) sepia(1) hue-rotate(-30deg) saturate(5); }
+}
+
+@keyframes float-up {
+  0%   { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(-80px); opacity: 0; }
+}
+
+/* ===================== LEVEL UP / CONFETTI ===================== */
+@keyframes confetti-fall {
+  0%   { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+@keyframes level-up-appear {
+  0%   { transform: scale(0.5) translateY(20px); opacity: 0; }
+  60%  { transform: scale(1.1) translateY(-5px); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ===================== UI COMPONENTS ===================== */
+.pixel-border {
+  border: 2px solid var(--border);
+  box-shadow: 0 0 0 1px var(--bg);
+}
+
+.pixel-button {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 10px;
+  padding: 12px 20px;
+  border: 2px solid currentColor;
+  cursor: pointer;
+  transition: all 0.1s;
+  image-rendering: pixelated;
+  letter-spacing: 0.5px;
+}
+
+.pixel-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.5);
+}
+
+.pixel-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: #6fa0ff;
+  border-color: #6fa0ff;
+}
+
+.btn-danger {
+  background: var(--red);
+  color: var(--white);
+  border-color: var(--red);
+}
+
+.btn-success {
+  background: var(--green);
+  color: var(--bg);
+  border-color: var(--green);
+}
+
+.btn-gold {
+  background: var(--gold);
+  color: var(--bg);
+  border-color: var(--gold);
+}
+
+/* HP Bar */
+.hp-bar {
+  height: 12px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.hp-fill {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+.hp-fill-player { background: var(--green); }
+.hp-fill-boss   { background: var(--red); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Panel glass */
+.glass-panel {
+  background: rgba(26, 26, 58, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+  .pixel-button {
+    font-size: 8px;
+    padding: 10px 14px;
+  }
 }
