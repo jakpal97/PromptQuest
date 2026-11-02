@@ -1,6 +1,7 @@
 -- =====================================================
 -- PROMPT QUEST — Schema SQL dla Supabase
--- Uruchom w Supabase SQL Editor
+-- Uruchom w Supabase SQL Editor na pustej bazie.
+-- Graczy dodaje osobno: node scripts/seed-players.js
 -- =====================================================
 
 -- Gracze
@@ -61,8 +62,12 @@ CREATE TABLE IF NOT EXISTS battles (
   co_poprawic text,
   wskazowka text,
   attempt_number integer DEFAULT 1,
-  completed_at timestamp DEFAULT now()
+  completed_at timestamp DEFAULT now(),
+  UNIQUE (player_id, level_id)
 );
+
+CREATE INDEX IF NOT EXISTS levels_module_id_idx ON levels(module_id);
+CREATE INDEX IF NOT EXISTS battles_level_id_idx ON battles(level_id);
 
 -- Archiwum sesji szkoleniowych
 CREATE TABLE IF NOT EXISTS training_sessions (
@@ -122,16 +127,20 @@ INSERT INTO levels (module_id, level_number, type, boss_dialogue, task_descripti
 (4, 6, 'blind_test', 'Mam dwie analizy SWOT. Jedna od AI, druga od konsultanta za 5000 zł. Zgadnij która jest która!',                 'Która analiza SWOT firmy technologicznej została napisana przez AI?',                                                             'Wskaż którą analizę SWOT napisała AI.',                                                                                          60, 6, NULL, 'MOCNE STRONY: Doświadczony zespół (śr. 8 lat), stabilna baza (87% retencja), własne IP. SŁABE STRONY: Ograniczony budżet marketingowy, wolny cykl sprzedaży (4 miesiące). SZANSE: Rynek AI, dotacje UE, konsolidacja. ZAGROŻENIA: Duzi gracze, koszty pracownicze, odpływ specjalistów.', 'Mocna strona to ludzie — znamy się od lat. Słabość której nie przyznajemy to sprzedaż — świetni technicznie, słabi w przekonywaniu. Szansa to fala AI. Ryzyko? Sami siebie — jeśli ktoś kluczowy odejdzie, poczujemy to mocno.', 'a');
 
 -- =====================================================
--- RLS (Row Level Security) — OPCJONALNE
--- Jeśli chcesz wyłączyć RLS dla prostszego działania:
+-- RLS — całe API działa na service role (omija RLS).
+-- Klucz anon jest publiczny w przeglądarce, więc bez RLS
+-- każdy mógłby odczytać password_hash graczy.
+-- Anon dostaje tylko odczyt battles, żeby działał Realtime w rankingu.
 -- =====================================================
-ALTER TABLE players DISABLE ROW LEVEL SECURITY;
-ALTER TABLE modules DISABLE ROW LEVEL SECURITY;
-ALTER TABLE levels DISABLE ROW LEVEL SECURITY;
-ALTER TABLE battles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE training_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE modules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE levels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE battles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE training_sessions ENABLE ROW LEVEL SECURITY;
 
--- Lub włącz i ustaw policies:
--- ALTER TABLE players ENABLE ROW LEVEL SECURITY;
--- CREATE POLICY "anon can read players" ON players FOR SELECT USING (true);
--- CREATE POLICY "anon can insert battles" ON battles FOR INSERT WITH CHECK (true);
+CREATE POLICY "anon can read battles" ON battles FOR SELECT TO anon USING (true);
+
+-- =====================================================
+-- REALTIME — ranking odświeża się na żywo
+-- =====================================================
+ALTER PUBLICATION supabase_realtime ADD TABLE battles;

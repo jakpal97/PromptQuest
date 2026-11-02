@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getPlayerLevel } from '@/lib/auth';
+import { nextPlayableLevel } from '@/lib/progress';
 import Character from '@/components/Character';
 
 const MODULE_NODES = [
@@ -18,10 +19,16 @@ export default function MapPage() {
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tooltip, setTooltip] = useState(null);
+  const [showHowTo, setShowHowTo] = useState(() => typeof window !== 'undefined' && !sessionStorage.getItem('seenHowTo'));
 
   useEffect(() => {
     loadData();
   }, []);
+
+  function closeHowTo() {
+    sessionStorage.setItem('seenHowTo', '1');
+    setShowHowTo(false);
+  }
 
   async function loadData() {
     const playerId = sessionStorage.getItem('playerId');
@@ -68,11 +75,13 @@ export default function MapPage() {
 
   function getModuleState(moduleId) {
     if (!player) return 'locked';
+    const mod = modules.find(m => m.day_number === moduleId);
+    const isAdmin = player.role === 'admin';
+    // Kolejne dni otwiera trener w panelu admina
+    if (moduleId > 1 && mod && !mod.unlocked && !isAdmin) return 'locked';
     if (moduleId < player.current_module) return 'completed';
     if (moduleId === player.current_module) return 'active';
-    // moduł jest za aktywnym — sprawdź czy admin go odblokował
-    const mod = modules.find(m => m.day_number === moduleId);
-    if (mod?.unlocked) return 'unlocked';
+    if (mod?.unlocked || isAdmin) return 'unlocked';
     return 'locked';
   }
 
@@ -81,27 +90,25 @@ export default function MapPage() {
     const state = getModuleState(moduleNode.id);
     if (state === 'locked') return;
 
-    const res = await fetch(`/api/levels?moduleId=${moduleNode.id}`);
-    const { levels } = res.ok ? await res.json() : { levels: [] };
+    const mod = modules.find(m => m.day_number === moduleNode.id);
+    const moduleId = mod?.id ?? moduleNode.id;
+    const [levelsRes, scoresRes] = await Promise.all([
+      fetch(`/api/levels?moduleId=${moduleId}`),
+      fetch(`/api/battles?playerId=${player?.id}&moduleId=${moduleId}`),
+    ]);
+    const { levels } = levelsRes.ok ? await levelsRes.json() : { levels: [] };
     if (!levels || levels.length === 0) return;
+    const { bestScores } = scoresRes.ok ? await scoresRes.json() : { bestScores: {} };
 
-    if (state === 'completed' || state === 'unlocked') {
-      // ukończony lub odblokowany przez admina — wejdź od pierwszego levelu
-      router.push(`/battle/${levels[0].id}`);
-      return;
-    }
-
-    // Aktywny moduł — wejdź do aktualnego levelu gracza
-    const currentLevelInModule = player?.current_level_in_module || 1;
-    const targetLevel = levels.find(l => l.level_number === currentLevelInModule) || levels[0];
-    router.push(`/battle/${targetLevel.id}`);
+    const target = nextPlayableLevel(levels, bestScores || {}, mod?.active_block, player?.role === 'admin');
+    if (target) router.push(`/battle/${target.id}`);
   }
 
   function getNodeStyle(state) {
     const base = {
       position: 'absolute',
-      width: 48,
-      height: 48,
+      width: 60,
+      height: 60,
       borderRadius: '50%',
       border: '3px solid',
       display: 'flex',
@@ -110,7 +117,7 @@ export default function MapPage() {
       cursor: state === 'locked' ? 'not-allowed' : 'pointer',
       transform: 'translate(-50%, -50%)',
       transition: 'all 0.2s',
-      zIndex: 10,
+      zIndex: 20,
     };
 
     switch (state) {
@@ -164,6 +171,8 @@ export default function MapPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+      {showHowTo && <HowToPlay onClose={closeHowTo} />}
+
       {/* Górny pasek */}
       <div style={{
         background: 'var(--panel)',
@@ -178,10 +187,10 @@ export default function MapPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Character characterId={player?.character_id} size={3} animate />
           <div>
-            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--gold)' }}>
+            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--gold)' }}>
               {player?.display_name || player?.username}
             </div>
-            <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
+            <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>
               {playerLevel.emoji} {playerLevel.name} • {player?.total_xp || 0} XP
             </div>
           </div>
@@ -189,6 +198,7 @@ export default function MapPage() {
 
         <div style={{ display: 'flex', gap: 8 }}>
           {/* Życia */}
+          {modules.find(m => m.day_number === player?.current_module)?.lives_enabled !== false && (
           <div style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
             padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4,
@@ -197,11 +207,28 @@ export default function MapPage() {
               <span key={i} style={{ fontSize: 16, opacity: i < (player?.current_lives || 3) ? 1 : 0.2 }}>❤️</span>
             ))}
           </div>
+          )}
+
+          <button
+            onClick={() => setShowHowTo(true)}
+            className="pixel-button"
+            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+          >
+            ❓ JAK GRAĆ
+          </button>
+
+          <button
+            onClick={() => router.push('/library')}
+            className="pixel-button"
+            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--green)' }}
+          >
+            📚 BIBLIOTEKA
+          </button>
 
           <button
             onClick={() => router.push('/leaderboard')}
             className="pixel-button"
-            style={{ fontSize: 8, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--gold)' }}
+            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--gold)' }}
           >
             🏆 RANKING
           </button>
@@ -249,7 +276,7 @@ export default function MapPage() {
         }}>
           {/* Obrazek mapy — wypełnia kontener */}
           <img
-            src="/map/office-map.png"
+            src="/map/office-map.webp"
             alt="Mapa biura"
             className="pixel-art"
             style={{
@@ -276,6 +303,10 @@ export default function MapPage() {
                   top: `${node.y}%`,
                 }}
                 onClick={() => handleNodeClick(node)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleNodeClick(node); } }}
+                role="button"
+                tabIndex={state === 'locked' ? -1 : 0}
+                aria-label={`${node.label} — ${state === 'locked' ? 'zablokowane' : 'wejdź'}`}
                 onMouseEnter={() => setTooltip(node.id)}
                 onMouseLeave={() => setTooltip(null)}
               >
@@ -299,12 +330,11 @@ export default function MapPage() {
                   transform: 'translateX(-50%)',
                   whiteSpace: 'nowrap',
                   fontFamily: "'Press Start 2P'",
-                  fontSize: 6,
+                  fontSize: 9,
                   color: state === 'active' ? 'var(--accent)' : state === 'completed' ? 'var(--green)' : state === 'unlocked' ? 'var(--gold)' : 'var(--muted)',
                   textShadow: '1px 1px 3px rgba(0,0,0,0.9)',
-                  pointerEvents: 'none',
-                  background: 'rgba(10,10,26,0.75)',
-                  padding: '2px 4px',
+                  background: 'rgba(10,10,26,0.85)',
+                  padding: '4px 6px',
                   display: state === 'locked' ? 'none' : 'block',
                 }}>
                   {node.label}
@@ -348,14 +378,19 @@ export default function MapPage() {
             const activeNode = MODULE_NODES.find(n => n.id === player.current_module);
             if (!activeNode) return null;
             return (
-              <div style={{
-                position: 'absolute',
-                left: `${activeNode.x + 4}%`,
-                top: `${activeNode.y + 6}%`,
-                transform: 'translate(-50%, -50%)',
-                zIndex: 15,
-                filter: 'drop-shadow(0 0 8px rgba(79,142,247,0.9))',
-              }}>
+              <div
+                onClick={() => handleNodeClick(activeNode)}
+                title="Wejdź do pokoju"
+                style={{
+                  position: 'absolute',
+                  left: `${activeNode.x + 7}%`,
+                  top: `${activeNode.y + 2}%`,
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 15,
+                  cursor: 'pointer',
+                  filter: 'drop-shadow(0 0 8px rgba(79,142,247,0.9))',
+                }}
+              >
                 <Character characterId={player.character_id} size={5} animate />
               </div>
             );
@@ -384,25 +419,82 @@ export default function MapPage() {
                   transition: 'all 0.15s',
                 }}
               >
-                <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: 'var(--muted)', marginBottom: 3 }}>
-                  MOD {mod.day_number}
+                <div style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--muted)', marginBottom: 4 }}>
+                  MODUŁ {mod.day_number} · {mod.boss_name}
                 </div>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--white)', fontWeight: 600, lineHeight: 1.2 }}>
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', fontWeight: 700, lineHeight: 1.2 }}>
                   {mod.title}
                 </div>
                 {state === 'active' && (
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 5, color: 'var(--accent)', marginTop: 4 }}>
-                    ▶ L{player?.current_level_in_module || 1}/{mod.total_levels}
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--accent)', marginTop: 6 }}>
+                    ▶ ZADANIE {player?.current_level_in_module || 1}/{mod.total_levels}
+                  </div>
+                )}
+                {state === 'locked' && (
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--muted)', marginTop: 6 }}>
+                    🔒 ZABLOKOWANY
                   </div>
                 )}
                 {state === 'completed' && (
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 5, color: 'var(--green)', marginTop: 4 }}>
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--green)', marginTop: 6 }}>
                     ✓ UKOŃCZONO
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const HOW_TO_STEPS = [
+  { icon: '🗺', title: 'Wybierz pokój', text: 'Każdy pokój to jeden dzień szkolenia. Kolejne ćwiczenia odblokowuje trener.' },
+  { icon: '✍️', title: 'Napisz jeden prompt', text: 'Jeden strzał, bez rozmowy z AI i bez załączników. Wszystko, co AI ma wiedzieć, musi być w tekście.' },
+  { icon: '🤖', title: 'AI go wykona', text: 'Prompt trafia do prawdziwego AI, a aplikacja ocenia go według kryteriów ćwiczenia.' },
+  { icon: '🚦', title: 'Zobacz strefę', text: 'Zielona = zaliczone i XP. Żółta albo czerwona = wskazówki i nowa próba, aż dojdziesz do zielonej. Bonus XP możesz zdobyć przy każdej zielonej próbie.' },
+];
+
+function HowToPlay({ onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(5,5,18,0.9)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--panel)', border: '2px solid var(--accent)', maxWidth: 640, width: '100%',
+          padding: '24px 26px', boxShadow: '0 0 40px rgba(79,142,247,0.3)', animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
+        }}
+      >
+        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 14, color: 'var(--gold)', textAlign: 'center', marginBottom: 20 }}>
+          ⚔ JAK GRAĆ
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {HOW_TO_STEPS.map((s, i) => (
+            <div key={s.title} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', padding: '12px 14px' }}>
+              <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, color: 'var(--accent)', marginBottom: 8 }}>
+                {i + 1}. {s.icon} {s.title}
+              </div>
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: 'var(--white)', fontWeight: 600, lineHeight: 1.45 }}>
+                {s.text}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5, marginTop: 16, textAlign: 'center' }}>
+          🛡 Dziś nie tracisz żyć — liczą się punkty. Poprawianie prompta to nie porażka, tak właśnie pracuje się z AI!
+          <br /><span style={{ color: '#ff9999' }}>🚫 Nie wklejaj nazwisk, kontaktów, PESEL-i, kwot z umów ani nazw klientów — pisz [KLIENT], [KWOTA], Firma X.</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
+          <button autoFocus onClick={onClose} className="pixel-button btn-primary" style={{ fontSize: 11 }}>
+            ROZUMIEM — GRAMY! ▶
+          </button>
         </div>
       </div>
     </div>

@@ -114,6 +114,15 @@ export default function AdminPage() {
     loadModules();
   }
 
+  async function setBlock(moduleId, activeBlock) {
+    await fetch('/api/admin/set-block', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ moduleId, activeBlock, playerId: sessionStorage.getItem('playerId') }),
+    });
+    loadModules();
+  }
+
   async function handleReset() {
     if (!sessionName.trim()) { alert('Podaj nazwę sesji!'); return; }
     setResetting(true);
@@ -350,7 +359,28 @@ export default function AdminPage() {
                     {players.filter(p => p.current_module > mod.day_number && p.role === 'player').length} osób ukończyło
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  {mod.max_block > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 12, borderRight: '1px solid var(--border)' }}>
+                      <span style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--gold)' }}>BLOK ĆWICZEŃ:</span>
+                      {Array.from({ length: mod.max_block }, (_, i) => i + 1).map(b => (
+                        <button
+                          key={b}
+                          onClick={() => setBlock(mod.id, b)}
+                          className="pixel-button"
+                          title={b === 1 ? 'Tylko blok 1' : `Odblokuj bloki 1–${b}`}
+                          style={{
+                            fontSize: 7, padding: '6px 10px',
+                            background: (mod.active_block || 1) >= b ? 'rgba(247,201,79,0.15)' : 'transparent',
+                            border: `1px solid ${(mod.active_block || 1) === b ? 'var(--gold)' : 'var(--border)'}`,
+                            color: (mod.active_block || 1) >= b ? 'var(--gold)' : 'var(--muted)',
+                          }}
+                        >
+                          {(mod.active_block || 1) >= b ? '🔓' : '🔒'} {b}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <span style={{
                     fontFamily: "'Press Start 2P'",
                     fontSize: 8,

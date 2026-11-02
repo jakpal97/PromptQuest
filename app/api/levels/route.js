@@ -21,7 +21,7 @@ export async function GET(req) {
     if (moduleId) {
       const { data: levels, error } = await supabase
         .from('levels')
-        .select('id, level_number, sort_order, type')
+        .select('id, level_number, sort_order, type, code, title, block, requires:config->>requires, label:config->>label, boss:config->boss, zones:config->zones')
         .eq('module_id', moduleId)
         .order('sort_order');
       if (error) return Response.json({ error: error.message }, { status: 500 });

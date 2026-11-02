@@ -132,7 +132,124 @@ html, body {
   100% { transform: scale(1) translateY(0); opacity: 1; }
 }
 
+@keyframes flash-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes pop-in {
+  0%   { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes bar-grow {
+  from { transform: scaleX(0); transform-origin: left; }
+  to   { transform: scaleX(1); transform-origin: left; }
+}
+
+@keyframes blink {
+  0%   { opacity: 1; }
+  100% { opacity: 0.2; }
+}
+
+@keyframes boss-think {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+@keyframes dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+}
+
+.loading-dots::after {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots 1.2s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 /* ===================== UI COMPONENTS ===================== */
+.chip-button {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 5px 10px;
+  background: rgba(15, 12, 36, 0.95);
+  border: 1px solid rgba(79, 142, 247, 0.4);
+  border-radius: 3px;
+  color: var(--white);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.chip-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(79, 142, 247, 0.15);
+  transform: translateY(-1px);
+}
+
+.chip-button:disabled { opacity: 0.4; cursor: default; }
+
+.chip-button:focus-visible,
+.pixel-button:focus-visible,
+.topbar-back:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.prompt-input {
+  width: 100%;
+  background: rgba(12, 10, 32, 0.95);
+  border: 2px solid rgba(79, 142, 247, 0.4);
+  border-radius: 4px;
+  color: var(--white);
+  padding: 10px 14px 26px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.55;
+  resize: vertical;
+  outline: none;
+  min-height: 150px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.prompt-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 142, 247, 0.15);
+}
+
+.prompt-input::placeholder { color: var(--muted); }
+
+.attack-button {
+  width: 100%;
+  font-size: 12px;
+  padding: 14px;
+  letter-spacing: 2px;
+  flex-shrink: 0;
+}
+
+.attack-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.topbar-back { color: var(--muted); transition: color 0.15s; }
+.topbar-back:hover { color: var(--white); }
+
 .pixel-border {
   border: 2px solid var(--border);
   box-shadow: 0 0 0 1px var(--bg);

@@ -46,8 +46,15 @@ export async function POST(req) {
       character_id: null,
     }).eq('role', 'player');
 
-    // Zablokuj moduły 2-4
+    // Biblioteka należy do konta, a konta przechodzą na kolejną grupę
+    const playerIds = (playersSummary || []).map(p => p.id);
+    if (playerIds.length) {
+      await supabase.from('prompt_library').delete().in('player_id', playerIds);
+    }
+
+    // Zablokuj moduły 2-4 i wróć do pierwszego bloku
     await supabase.from('modules').update({ unlocked: false }).gt('day_number', 1);
+    await supabase.from('modules').update({ active_block: 1 }).gte('day_number', 1);
 
     return Response.json({ success: true, archived: battlesCount });
   } catch (err) {

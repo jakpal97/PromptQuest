@@ -25,7 +25,8 @@ export async function POST(req) {
       return Response.json({ error: 'Nieprawidłowy kod dostępu lub hasło' }, { status: 401 });
     }
 
-    return Response.json({ player });
+    const { password_hash, ...safePlayer } = player;
+    return Response.json({ player: safePlayer });
   } catch (err) {
     console.error('Login error:', err);
     return Response.json({ error: 'Błąd serwera' }, { status: 500 });

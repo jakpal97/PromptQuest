@@ -10,7 +10,7 @@ export async function GET(req) {
     const supabase = getServiceClient();
     const { data: player, error } = await supabase
       .from('players')
-      .select('*')
+      .select('id, username, display_name, character_id, role, total_xp, current_module, current_lives, current_level_in_module, created_at')
       .eq('id', playerId)
       .single();
 

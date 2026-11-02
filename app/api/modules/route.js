@@ -5,11 +5,15 @@ export async function GET() {
     const supabase = getServiceClient();
     const { data: modules, error } = await supabase
       .from('modules')
-      .select('*')
+      .select('*, levels(block)')
       .order('day_number');
 
     if (error) return Response.json({ error: error.message }, { status: 500 });
-    return Response.json({ modules });
+    const withBlocks = modules.map(({ levels, ...mod }) => ({
+      ...mod,
+      max_block: Math.max(1, ...(levels || []).map(l => l.block || 1)),
+    }));
+    return Response.json({ modules: withBlocks });
   } catch (err) {
     return Response.json({ error: 'Błąd serwera' }, { status: 500 });
   }
