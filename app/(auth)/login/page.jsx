@@ -10,10 +10,16 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     const playerId = sessionStorage.getItem('playerId');
-    if (playerId) router.push('/map');
+    if (playerId) { router.push('/map'); return; }
+    const timer = setTimeout(() => {
+      const text = sessionStorage.getItem('loginNotice');
+      if (text) { setNotice(text); sessionStorage.removeItem('loginNotice'); }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [router]);
 
   async function handleLogin(e) {
@@ -141,6 +147,22 @@ export default function LoginPage() {
         }}>
           WEJDŹ DO GRY
         </div>
+
+        {notice && (
+          <div role="alert" style={{
+            background: 'rgba(247,201,79,0.12)',
+            border: '1px solid var(--gold)',
+            color: '#f3e3b0',
+            padding: '10px 12px',
+            marginBottom: 16,
+            fontFamily: "'Rajdhani', sans-serif",
+            fontSize: 16,
+            fontWeight: 600,
+            lineHeight: 1.45,
+          }}>
+            ⚠ {notice}
+          </div>
+        )}
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>

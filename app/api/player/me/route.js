@@ -1,11 +1,11 @@
 import { getServiceClient } from '@/lib/supabase';
+import { sessionPlayerId } from '@/lib/session';
 
-export async function GET(req) {
+// Gracz z podpisanej sesji — to samo źródło tożsamości, którego używa zapis prób
+export async function GET() {
   try {
-    const { searchParams } = new URL(req.url);
-    const playerId = searchParams.get('id');
-
-    if (!playerId) return Response.json({ error: 'Brak id gracza' }, { status: 400 });
+    const playerId = await sessionPlayerId();
+    if (!playerId) return Response.json({ error: 'Sesja wygasła — zaloguj się ponownie.', code: 'no_session' }, { status: 401 });
 
     const supabase = getServiceClient();
     const { data: player, error } = await supabase
@@ -14,7 +14,7 @@ export async function GET(req) {
       .eq('id', playerId)
       .single();
 
-    if (error || !player) return Response.json({ error: 'Nie znaleziono gracza' }, { status: 404 });
+    if (error || !player) return Response.json({ error: 'Nie znaleziono gracza', code: 'no_session' }, { status: 401 });
 
     return Response.json({ player });
   } catch (err) {

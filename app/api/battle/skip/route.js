@@ -9,7 +9,7 @@ export async function POST(req) {
     if (!levelId) return Response.json({ error: 'Brak danych' }, { status: 400 });
 
     const playerId = await sessionPlayerId();
-    const denied = await guardLevelAccess(playerId, levelId);
+    const denied = await guardLevelAccess(playerId, levelId, req);
     if (denied) return denied;
 
     const supabase = getServiceClient();

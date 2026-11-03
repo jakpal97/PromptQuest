@@ -1,8 +1,9 @@
 import { getServiceClient } from '@/lib/supabase';
+import { sessionPlayerId } from '@/lib/session';
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
-  const playerId = searchParams.get('playerId');
+  const playerId = await sessionPlayerId();
   const moduleId = searchParams.get('moduleId');
 
   if (!playerId || !moduleId) return Response.json({ bestScores: {}, attempts: {}, prompts: {} });

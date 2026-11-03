@@ -21,7 +21,7 @@ export async function POST(req) {
     }
 
     const playerId = await sessionPlayerId();
-    const denied = await guardLevelAccess(playerId, levelId);
+    const denied = await guardLevelAccess(playerId, levelId, req);
     if (denied) return denied;
 
     const supabase = getServiceClient();

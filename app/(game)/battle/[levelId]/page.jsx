@@ -8,6 +8,10 @@ import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName } f
 import Character from '@/components/Character';
 import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, StrongHint, SkipOffer, zoneBossLine, ZONES } from '@/components/ExercisePanels';
 
+function apiHeaders() {
+  return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
+}
+
 const STRONG_HINT_AFTER = 3;
 const SKIP_AFTER = 5;
 
@@ -235,11 +239,11 @@ export default function BattlePage() {
     try {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders(),
         body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId) }),
       });
       const data = await res.json();
-      if (res.status === 401) { expireSession(); return; }
+      if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
       if (data.przyklad_zdania) {
         const next = { example: data.przyklad_zdania, missing: data.co_poprawic };
@@ -301,7 +305,7 @@ export default function BattlePage() {
 
     const res = await fetch('/api/battle/complete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({
         levelId: parseInt(levelId),
         score: data.score, zone: data.zone || null, bonus: !!data.bonus,
@@ -311,7 +315,7 @@ export default function BattlePage() {
       }),
     });
     const savedData = await res.json();
-    if (res.status === 401) { expireSession(); return; }
+    if (res.status === 401 || savedData.code === 'session_mismatch') { expireSession(savedData.error); return; }
     if (!res.ok) {
       setResult(r => ({ ...r, error: true, co_poprawic: savedData.error || 'Nie udało się zapisać próby.' }));
       return;
@@ -361,11 +365,11 @@ export default function BattlePage() {
     try {
       const res = await fetch('/api/battle/skip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders(),
         body: JSON.stringify({ levelId: id }),
       });
       const data = await res.json();
-      if (res.status === 401) { expireSession(); return; }
+      if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
       if (!res.ok) throw new Error(data.error || 'Nie udało się zapisać.');
       setCompletedVia(prev => ({ ...prev, [id]: 'reference' }));
       setSkipState({ done: true, xpGained: data.xpGained });
@@ -375,8 +379,9 @@ export default function BattlePage() {
     }
   }
 
-  function expireSession() {
+  function expireSession(notice) {
     sessionStorage.clear();
+    if (notice) sessionStorage.setItem('loginNotice', notice);
     router.push('/login');
   }
 
