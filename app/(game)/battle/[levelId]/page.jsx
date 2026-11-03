@@ -101,6 +101,7 @@ export default function BattlePage() {
   const [showLevelList, setShowLevelList] = useState(false);
   const [completedVia, setCompletedVia] = useState({});
   const [skipState, setSkipState] = useState(null);
+  const [copyNotice, setCopyNotice] = useState(null);
 
   const textareaRef = useRef(null);
   const panelRef = useRef(null);
@@ -153,6 +154,7 @@ export default function BattlePage() {
     setLibraryState(null);
     setShowLevelList(false);
     setSkipState(null);
+    setCopyNotice(null);
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -234,6 +236,7 @@ export default function BattlePage() {
     setResult(null);
     setSaved(null);
     setShowFullResponse(false);
+    setCopyNotice(null);
     try {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
@@ -242,6 +245,7 @@ export default function BattlePage() {
       });
       const data = await res.json();
       if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
+      if (data.code === 'too_similar') { setCopyNotice(data); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
       setResult(data);
       await animateAndSave(data);
@@ -782,6 +786,12 @@ export default function BattlePage() {
                       {wordCount} słów
                     </div>
                   </div>
+                  {copyNotice && (
+                    <div role="alert" style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#f3e3b0', background: 'rgba(247,201,79,0.12)', border: '1px solid var(--gold)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
+                      ✋ {copyNotice.error}
+                      <div style={{ fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>Podobieństwo: {copyNotice.similarity}% · ta próba nie została policzona.</div>
+                    </div>
+                  )}
                   {redZoneHits.length > 0 && (
                     <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#ff9999', background: 'rgba(247,79,79,0.12)', border: '1px solid var(--red)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
                       🚫 Wygląda na dane z czerwonej strefy: {redZoneHits.join(', ')}. Zamień je na placeholder — taki prompt nie zostanie wysłany do AI.

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getServiceClient } from '@/lib/supabase';
 import { detectRedZone } from '@/lib/redZone';
 import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
+import { copyBlock } from '@/lib/similarity';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -61,9 +62,12 @@ export async function POST(req) {
 
     const { data: level } = await getServiceClient()
       .from('levels')
-      .select('module_id, code, title, task_description, goal_description, broken_prompt, config')
+      .select('module_id, code, title, task_description, goal_description, broken_prompt, config, modules(day_number)')
       .eq('id', levelId)
       .single();
+
+    const copied = copyBlock(userPrompt, level);
+    if (copied) return Response.json(copied, { status: 422 });
 
     if (level.config?.zones) {
       return Response.json(await evaluateZones(userPrompt, level, playerId));

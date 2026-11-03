@@ -1,6 +1,7 @@
 import { getServiceClient } from '@/lib/supabase';
 import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
 import { LEVEL_SELECT, applyPass, battlePassed, passMarkFor } from '@/lib/progress-server';
+import { copyBlock } from '@/lib/similarity';
 
 function levelXpFor({ score, zone, bonus, xpReward, bonusXp }) {
   if (zone) {
@@ -33,6 +34,8 @@ export async function POST(req) {
 
     if (!player) return Response.json({ error: 'Brak gracza' }, { status: 404 });
     if (!level) return Response.json({ error: 'Brak zadania' }, { status: 404 });
+    const copied = copyBlock(promptUsed, level);
+    if (copied) return Response.json(copied, { status: 422 });
 
     const livesEnabled = level.modules?.lives_enabled !== false;
     const validZone = ['green', 'yellow', 'red'].includes(zone) ? zone : null;
