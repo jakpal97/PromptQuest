@@ -241,23 +241,40 @@ export function RevealAfterPass({ reveal }) {
   );
 }
 
-// Podpowiedź po 3 nieudanych próbach: jedno przykładowe zdanie do dopisania, nie cały prompt
-export function StrongHint({ hint, onAppend }) {
-  if (!hint?.example) return null;
+const EXAMPLE_TAGS = {
+  ROLA:           { color: 'var(--accent)',  bg: 'rgba(79,142,247,0.14)' },
+  KONTEKST:       { color: 'var(--accent2)', bg: 'rgba(247,79,142,0.14)' },
+  ZADANIE:        { color: 'var(--gold)',    bg: 'rgba(247,201,79,0.14)' },
+  ZABEZPIECZENIE: { color: 'var(--red)',     bg: 'rgba(247,79,79,0.14)' },
+  FORMAT:         { color: 'var(--green)',   bg: 'rgba(79,247,160,0.14)' },
+};
+
+// Po 3 nieudanych próbach: gotowy prompt dla innego scenariusza, żeby nie dało się go skopiować 1:1
+export function OtherExample({ example }) {
+  if (!example?.lines?.length) return null;
   return (
-    <Card color="var(--gold)" background="rgba(247,201,79,0.08)">
-      <Label color="var(--gold)">🧭 DODATKOWA POMOC</Label>
-      {hint.missing && <div style={{ ...body, color: '#f3e3b0', marginBottom: 8 }}>{hint.missing}</div>}
-      <div style={{ ...body, color: 'var(--muted)', marginBottom: 4 }}>Możesz dopisać do swojego prompta na przykład takie zdanie:</div>
-      <div style={{ ...body, fontWeight: 500, background: 'rgba(10,10,26,0.9)', borderLeft: '3px solid var(--gold)', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
-        {hint.example}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+      <Card color="var(--gold)" background="rgba(247,201,79,0.06)">
+        <Label color="var(--gold)">🧩 PRZYKŁAD Z INNEJ SYTUACJI</Label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {example.lines.map((line, i) => {
+            const tag = EXAMPLE_TAGS[line.tag];
+            if (!tag) return <div key={i} style={{ ...body, color: 'var(--muted)' }}>{line.text}</div>;
+            return (
+              <div key={i} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 10px', borderLeft: `3px solid ${tag.color}`, paddingLeft: 10 }}>
+                <span style={{ fontFamily: PIXEL, fontSize: 10, lineHeight: 1.6, color: tag.color, background: tag.bg, border: `1px solid ${tag.color}`, padding: '2px 6px', borderRadius: 2, flexShrink: 0 }}>
+                  {line.tag}
+                </span>
+                <span style={{ ...body, fontWeight: 500, flex: '1 1 14rem' }}>{line.text}</span>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <div style={{ ...body, fontSize: 17, fontWeight: 700, color: '#f3e3b0' }}>
+        👉 Zrób swój prompt tak samo, ale dla swojego zadania.
       </div>
-      {onAppend && (
-        <button onClick={() => onAppend(hint.example)} className="chip-button" style={{ marginTop: 8, borderColor: 'var(--gold)', color: 'var(--gold)' }}>
-          ✏️ Dopisz to zdanie do mojego prompta
-        </button>
-      )}
-    </Card>
+    </div>
   );
 }
 

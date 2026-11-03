@@ -6,13 +6,13 @@ import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
 import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, StrongHint, SkipOffer, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, zoneBossLine, ZONES } from '@/components/ExercisePanels';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
 }
 
-const STRONG_HINT_AFTER = 3;
+const EXAMPLE_AFTER = 3;
 const SKIP_AFTER = 5;
 
 const PIXEL = "'Press Start 2P'";
@@ -100,7 +100,6 @@ export default function BattlePage() {
   const [savedZones, setSavedZones] = useState({});
   const [showLevelList, setShowLevelList] = useState(false);
   const [completedVia, setCompletedVia] = useState({});
-  const [hint, setHint] = useState(null);
   const [skipState, setSkipState] = useState(null);
 
   const textareaRef = useRef(null);
@@ -154,7 +153,6 @@ export default function BattlePage() {
     setLibraryState(null);
     setShowLevelList(false);
     setSkipState(null);
-    setHint(JSON.parse(sessionStorage.getItem(`hint:${levelId}`) || 'null'));
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -245,11 +243,6 @@ export default function BattlePage() {
       const data = await res.json();
       if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
-      if (data.przyklad_zdania) {
-        const next = { example: data.przyklad_zdania, missing: data.co_poprawic };
-        setHint(next);
-        sessionStorage.setItem(`hint:${levelId}`, JSON.stringify(next));
-      }
       setResult(data);
       await animateAndSave(data);
     } catch (err) {
@@ -477,7 +470,7 @@ export default function BattlePage() {
   const passMark = zoneMode ? 90 : 40;
   const passedHere = level ? isPassed(level, bestScores, completedVia) : false;
   const failedAttempts = passedHere ? 0 : (attempts[id] ?? 0);
-  const showStrongHint = zoneMode && !passedHere && failedAttempts >= STRONG_HINT_AFTER && !!hint?.example;
+  const showExample = zoneMode && !passedHere && failedAttempts >= EXAMPLE_AFTER && !!cfg.other_example;
   const canSkip = zoneMode && !!cfg.reference && (skipState?.done || (!passedHere && failedAttempts >= SKIP_AFTER));
   const referenceUnlocked = zoneMode ? passedHere : (bestScores[id] ?? 0) >= 70 || (attempts[id] ?? 0) >= 2;
   const skipNext = !result && skipState?.done && nextLevel && !nextLocked
@@ -761,7 +754,7 @@ export default function BattlePage() {
                       : <>Poprzednia próba: <span style={{ color: scoreColorOf(lastAttempt.score) }}>{lastAttempt.score}/100</span> — popraw prompt i pobij ten wynik!</>}
                   </div>
                 )}
-                {showStrongHint && <StrongHint hint={hint} onAppend={insertBlock} />}
+                {showExample && <OtherExample example={cfg.other_example} />}
                 {canSkip && <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={skipNext} />}
               </>
             )}
@@ -862,9 +855,7 @@ export default function BattlePage() {
             )}
             <FeedbackBox icon="💡" label="WSKAZÓWKA" text={result.wskazowka} color="var(--gold)" />
 
-            {showStrongHint && result.zone !== 'green' && !result.error && (
-              <StrongHint hint={hint} onAppend={(t) => retry(`${prompt.trimEnd()}\n${t}`)} />
-            )}
+            {showExample && result.zone !== 'green' && !result.error && <OtherExample example={cfg.other_example} />}
             {canSkip && !result.error && (
               <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} />
             )}
