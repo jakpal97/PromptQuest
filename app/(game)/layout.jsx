@@ -37,7 +37,7 @@ export default function GameLayout({ children }) {
       }}>
         <div style={{
           fontFamily: "'Press Start 2P', monospace",
-          fontSize: 10,
+          fontSize: 12,
           color: 'var(--accent)',
           animation: 'pulse 1s ease-in-out infinite',
         }}>

@@ -182,7 +182,7 @@ export default function AdminPage() {
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--accent)' }}>ŁADOWANIE ADMINA...</span>
+        <span style={{ fontFamily: "'Press Start 2P'", fontSize: 12, color: 'var(--accent)' }}>ŁADOWANIE ADMINA...</span>
       </div>
     );
   }
@@ -200,21 +200,21 @@ export default function AdminPage() {
         flexWrap: 'wrap',
         gap: 8,
       }}>
-        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 'clamp(8px,2vw,12px)', color: 'var(--accent2)' }}>
+        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 'clamp(12px, 1.1vw, 14px)', lineHeight: 1.5, color: 'var(--accent2)' }}>
           ⚙ PANEL ADMINA
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <button
             onClick={() => setShowResetModal(true)}
             className="pixel-button btn-danger"
-            style={{ fontSize: 8 }}
+            style={{ fontSize: 11 }}
           >
             🔄 RESET KURSU
           </button>
           <button
             onClick={() => router.push('/map')}
             className="pixel-button"
-            style={{ fontSize: 8, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
+            style={{ fontSize: 11, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
             ← MAPA
           </button>
@@ -225,23 +225,26 @@ export default function AdminPage() {
         <div style={{
           background: resetMsg.startsWith('✅') ? 'rgba(79,247,160,0.1)' : 'rgba(247,79,79,0.1)',
           border: `1px solid ${resetMsg.startsWith('✅') ? 'var(--green)' : 'var(--red)'}`,
-          padding: '10px 16px',
+          padding: '0 0 0 16px',
           fontFamily: "'Rajdhani'",
-          fontSize: 15,
+          fontSize: 16,
           color: 'var(--white)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
         }}>
-          {resetMsg}
-          <button onClick={() => setResetMsg('')} style={{ float: 'right', background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
+          <span style={{ flex: 1, minWidth: 0, padding: '10px 0' }}>{resetMsg}</span>
+          <button onClick={() => setResetMsg('')} style={{ minWidth: 44, minHeight: 44, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
         </div>
       )}
 
       {/* Tabs */}
       <div style={{
         display: 'flex',
+        flexWrap: 'wrap',
         gap: 4,
         padding: '12px 16px 0',
         borderBottom: '1px solid var(--border)',
-        overflowX: 'auto',
       }}>
         {TABS.map(t => (
           <button
@@ -249,7 +252,8 @@ export default function AdminPage() {
             onClick={() => setTab(t.id)}
             style={{
               fontFamily: "'Press Start 2P'",
-              fontSize: 7,
+              fontSize: 11,
+              minHeight: 44,
               padding: '8px 12px',
               background: tab === t.id ? 'var(--panel)' : 'transparent',
               border: '1px solid',
@@ -266,29 +270,29 @@ export default function AdminPage() {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, padding: '16px', overflowX: 'auto' }}>
+      <div style={{ flex: 1, padding: '16px', minWidth: 0 }}>
 
         {/* UCZESTNICY */}
         {tab === 'players' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-              <span style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--muted)' }}>
+              <span style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)' }}>
                 {players.filter(p => p.role === 'player').length} UCZESTNIKÓW
               </span>
               <button
                 onClick={exportPlayersCSV}
                 className="pixel-button"
-                style={{ fontSize: 7, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}
+                style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}
               >
                 ⬇ POBIERZ CSV
               </button>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 14 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 16 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg2)' }}>
                     {['Postać', 'Username', 'Imię', 'Poziom', 'XP', 'Moduł'].map(h => (
-                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 6, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                         {h}
                       </th>
                     ))}
@@ -320,7 +324,7 @@ export default function AdminPage() {
                             border: '1px solid var(--border)',
                             padding: '2px 8px',
                             fontFamily: "'Press Start 2P'",
-                            fontSize: 7,
+                            fontSize: 11,
                           }}>
                             M{p.current_module} L{p.current_level_in_module}
                           </span>
@@ -349,20 +353,20 @@ export default function AdminPage() {
                 gap: 12,
               }}>
                 <div>
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, color: 'var(--white)', marginBottom: 4 }}>
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 12, lineHeight: 1.5, color: 'var(--white)', marginBottom: 4 }}>
                     MODUŁ {mod.day_number}: {mod.title}
                   </div>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, color: 'var(--muted)' }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)' }}>
                     {mod.location} • Szef: {mod.boss_name} • {mod.total_levels} leveli
                   </div>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)', marginTop: 4 }}>
                     {players.filter(p => p.current_module > mod.day_number && p.role === 'player').length} osób ukończyło
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   {mod.max_block > 1 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 12, borderRight: '1px solid var(--border)' }}>
-                      <span style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--gold)' }}>BLOK ĆWICZEŃ:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, paddingRight: 12, borderRight: '1px solid var(--border)' }}>
+                      <span style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--gold)' }}>BLOK ĆWICZEŃ:</span>
                       {Array.from({ length: mod.max_block }, (_, i) => i + 1).map(b => (
                         <button
                           key={b}
@@ -370,7 +374,7 @@ export default function AdminPage() {
                           className="pixel-button"
                           title={b === 1 ? 'Tylko blok 1' : `Odblokuj bloki 1–${b}`}
                           style={{
-                            fontSize: 7, padding: '6px 10px',
+                            fontSize: 11, padding: '6px 10px',
                             background: (mod.active_block || 1) >= b ? 'rgba(247,201,79,0.15)' : 'transparent',
                             border: `1px solid ${(mod.active_block || 1) === b ? 'var(--gold)' : 'var(--border)'}`,
                             color: (mod.active_block || 1) >= b ? 'var(--gold)' : 'var(--muted)',
@@ -383,7 +387,7 @@ export default function AdminPage() {
                   )}
                   <span style={{
                     fontFamily: "'Press Start 2P'",
-                    fontSize: 8,
+                    fontSize: 11,
                     color: mod.unlocked ? 'var(--green)' : 'var(--red)',
                   }}>
                     {mod.unlocked ? '🔓 ODBLOKOWANY' : '🔒 ZABLOKOWANY'}
@@ -392,7 +396,7 @@ export default function AdminPage() {
                     onClick={() => toggleModule(mod.id, mod.unlocked)}
                     className="pixel-button"
                     style={{
-                      fontSize: 7,
+                      fontSize: 11,
                       background: mod.unlocked ? 'rgba(247,79,79,0.1)' : 'rgba(79,247,160,0.1)',
                       border: `1px solid ${mod.unlocked ? 'var(--red)' : 'var(--green)'}`,
                       color: mod.unlocked ? 'var(--red)' : 'var(--green)',
@@ -409,7 +413,7 @@ export default function AdminPage() {
         {/* ANALYTICS */}
         {tab === 'analytics' && (
           <div>
-            <div style={{ marginBottom: 12, fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--muted)' }}>
+            <div style={{ marginBottom: 12, fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)' }}>
               STATUS LEVELÓW (na podstawie wyników)
             </div>
             {analytics.length === 0 ? (
@@ -418,11 +422,11 @@ export default function AdminPage() {
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 13 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 16 }}>
                   <thead>
                     <tr style={{ background: 'var(--bg2)' }}>
                       {['Level', 'Moduł', 'Typ', 'Avg score', '% <40', '% >80', 'Avg prób', 'Gracze', 'Status'].map(h => (
-                        <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 6, color: 'var(--muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                        <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)', verticalAlign: 'bottom' }}>
                           {h}
                         </th>
                       ))}
@@ -433,7 +437,7 @@ export default function AdminPage() {
                       <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                         <td style={{ padding: '8px 10px' }}>L{row.level_number}</td>
                         <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>M{row.module_day}</td>
-                        <td style={{ padding: '8px 10px', fontSize: 11 }}>{row.type}</td>
+                        <td style={{ padding: '8px 10px' }}>{row.type}</td>
                         <td style={{ padding: '8px 10px', color: row.avg < 40 ? 'var(--red)' : row.avg > 80 ? 'var(--gold)' : 'var(--green)', fontWeight: 700 }}>
                           {row.avg}
                         </td>
@@ -474,10 +478,10 @@ export default function AdminPage() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                     <div>
-                      <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, color: 'var(--white)', marginBottom: 4 }}>
+                      <div style={{ fontFamily: "'Press Start 2P'", fontSize: 12, lineHeight: 1.5, color: 'var(--white)', marginBottom: 4 }}>
                         {s.session_name}
                       </div>
-                      <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)' }}>
+                      <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)' }}>
                         {new Date(s.session_date).toLocaleDateString('pl-PL')} •{' '}
                         {summary.length} uczestników • {battles.length} walk •{' '}
                         Avg XP: {avgXp}
@@ -489,7 +493,7 @@ export default function AdminPage() {
                         username: p.username, imie: p.display_name || '', xp: p.total_xp,
                       })), `${s.session_name.replace(/\s/g, '_')}.csv`)}
                       className="pixel-button"
-                      style={{ fontSize: 7, background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}
+                      style={{ fontSize: 11, background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}
                     >
                       ⬇ CSV
                     </button>
@@ -506,24 +510,25 @@ export default function AdminPage() {
         <div style={{
           position: 'fixed', inset: 0, zIndex: 300,
           background: 'rgba(10,10,26,0.92)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', overflowY: 'auto',
           padding: 16,
         }}>
           <div style={{
+            margin: 'auto',
             background: 'var(--panel)',
             border: '2px solid var(--red)',
             padding: 28,
-            maxWidth: 400,
+            maxWidth: '26rem',
             width: '100%',
           }}>
-            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--red)', marginBottom: 16, textAlign: 'center' }}>
+            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 12, color: 'var(--red)', marginBottom: 16, textAlign: 'center' }}>
               ⚠ RESET KURSU
             </div>
-            <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: 'var(--muted)', marginBottom: 20, lineHeight: 1.6 }}>
+            <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)', marginBottom: 20, lineHeight: 1.6 }}>
               Wszystkie postępy graczy zostaną zresetowane. Dane zostaną zarchiwizowane.
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>
+              <label style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>
                 NAZWA SESJI (do archiwum)
               </label>
               <input
@@ -536,14 +541,15 @@ export default function AdminPage() {
                   background: 'var(--bg2)',
                   border: '2px solid var(--border)',
                   color: 'var(--white)',
+                  minHeight: 48,
                   padding: '10px 12px',
                   fontFamily: "'Rajdhani'",
-                  fontSize: 15,
+                  fontSize: 16,
                   outline: 'none',
                 }}
               />
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <button
                 onClick={handleReset}
                 disabled={resetting}

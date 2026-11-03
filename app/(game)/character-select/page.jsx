@@ -56,13 +56,14 @@ export default function CharacterSelectPage() {
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'flex-start',
-      padding: '30px 16px',
+      padding: 'clamp(16px, 4vh, 30px) 16px',
       paddingBottom: 40,
     }}>
       {/* Tytuł */}
       <div style={{
         fontFamily: "'Press Start 2P', monospace",
-        fontSize: 'clamp(10px, 2.5vw, 16px)',
+        fontSize: 'clamp(12px, 2.5vw, 16px)',
+        lineHeight: 1.5,
         color: 'var(--gold)',
         textShadow: '3px 3px 0 #8B5A00',
         marginBottom: 8,
@@ -73,8 +74,8 @@ export default function CharacterSelectPage() {
       <div style={{
         fontFamily: "'Rajdhani', sans-serif",
         color: 'var(--muted)',
-        fontSize: 14,
-        marginBottom: 32,
+        fontSize: 16,
+        marginBottom: 'clamp(16px, 4vh, 32px)',
         textAlign: 'center',
       }}>
         Kto będzie reprezentował Cię w biurze?
@@ -83,11 +84,11 @@ export default function CharacterSelectPage() {
       {/* Grid postaci */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(min(6.5rem, 100%), 1fr))',
         gap: 12,
-        marginBottom: 32,
+        marginBottom: 'clamp(16px, 4vh, 32px)',
         width: '100%',
-        maxWidth: 480,
+        maxWidth: '30rem',
       }}>
         {Array.from({ length: TOTAL_CHARACTERS }, (_, i) => i + 1).map(id => (
           <button
@@ -121,7 +122,7 @@ export default function CharacterSelectPage() {
             />
             <span style={{
               fontFamily: "'Press Start 2P', monospace",
-              fontSize: 7,
+              fontSize: 11,
               color: selected === id ? 'var(--accent)' : 'var(--muted)',
             }}>
               #{id}
@@ -134,7 +135,7 @@ export default function CharacterSelectPage() {
       {selected && (
         <div style={{
           width: '100%',
-          maxWidth: 400,
+          maxWidth: '26rem',
           background: 'var(--panel)',
           border: '2px solid var(--border)',
           padding: 24,
@@ -142,7 +143,8 @@ export default function CharacterSelectPage() {
         }}>
           <div style={{
             fontFamily: "'Press Start 2P', monospace",
-            fontSize: 8,
+            fontSize: 11,
+            lineHeight: 1.5,
             color: 'var(--white)',
             marginBottom: 16,
             textAlign: 'center',
@@ -152,7 +154,7 @@ export default function CharacterSelectPage() {
           <div style={{ marginBottom: 8 }}>
             <label style={{
               fontFamily: "'Press Start 2P', monospace",
-              fontSize: 7,
+              fontSize: 11,
               color: 'var(--muted)',
               display: 'block',
               marginBottom: 8,
@@ -168,6 +170,7 @@ export default function CharacterSelectPage() {
                 background: 'var(--bg2)',
                 border: '2px solid var(--border)',
                 color: 'var(--white)',
+                minHeight: 48,
                 padding: '10px 12px',
                 fontFamily: "'Rajdhani', sans-serif",
                 fontSize: 16,
@@ -182,7 +185,7 @@ export default function CharacterSelectPage() {
             <div style={{
               color: 'var(--red)',
               fontFamily: "'Rajdhani', sans-serif",
-              fontSize: 13,
+              fontSize: 16,
               marginBottom: 12,
             }}>
               ❌ {error}

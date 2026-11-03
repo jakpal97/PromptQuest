@@ -58,30 +58,32 @@ export default function LeaderboardPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8,
       }}>
-        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 'clamp(8px, 2vw, 12px)', color: 'var(--gold)' }}>
+        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 'clamp(12px, 1.1vw, 14px)', lineHeight: 1.5, color: 'var(--gold)' }}>
           🏆 RANKING LIVE
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
           {lastUpdate && (
-            <span style={{ fontFamily: "'Rajdhani'", fontSize: 12, color: 'var(--muted)' }}>
+            <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)' }}>
               Aktualizacja: {lastUpdate.toLocaleTimeString('pl-PL')}
             </span>
           )}
           <button
             onClick={() => router.push('/map')}
             className="pixel-button"
-            style={{ fontSize: 8, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
+            style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
             ← MAPA
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: '20px 16px', maxWidth: 700, margin: '0 auto', width: '100%' }}>
+      <div style={{ flex: 1, padding: '20px 16px', maxWidth: '48rem', margin: '0 auto', width: '100%' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}>
-            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--accent)' }}>
+            <span style={{ fontFamily: "'Press Start 2P'", fontSize: 12, color: 'var(--accent)' }}>
               ŁADOWANIE RANKINGU...
             </span>
           </div>
@@ -98,6 +100,7 @@ export default function LeaderboardPage() {
                     border: `2px solid ${isMe ? 'var(--accent)' : idx < 3 ? ['#FFD700', '#C0C0C0', '#CD7F32'][idx] : 'var(--border)'}`,
                     padding: '12px 16px',
                     display: 'flex',
+                    flexWrap: 'wrap',
                     alignItems: 'center',
                     gap: 12,
                     transition: 'all 0.2s',
@@ -133,30 +136,31 @@ export default function LeaderboardPage() {
                   )}
 
                   {/* Info gracza */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: '1 1 12rem', minWidth: 0 }}>
                     <div style={{
                       fontFamily: "'Rajdhani'",
-                      fontSize: 16,
+                      fontSize: 18,
                       fontWeight: 700,
                       color: isMe ? 'var(--accent)' : 'var(--white)',
                       display: 'flex',
+                      flexWrap: 'wrap',
                       alignItems: 'center',
                       gap: 6,
                     }}>
                       {player.display_name || player.username}
-                      {isMe && <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: 'var(--accent)' }}>TY</span>}
+                      {isMe && <span style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--accent)' }}>TY</span>}
                     </div>
-                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)' }}>
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)' }}>
                       {lvl.emoji} {lvl.name} • {player.battles_won} walk wygranych
                     </div>
                   </div>
 
                   {/* XP */}
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--gold)' }}>
+                  <div style={{ textAlign: 'right', marginLeft: 'auto' }}>
+                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 13, color: 'var(--gold)' }}>
                       {player.total_xp}
                     </div>
-                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: 'var(--muted)' }}>XP</div>
+                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>XP</div>
                   </div>
                 </div>
               );

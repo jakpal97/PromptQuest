@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getServiceClient } from '@/lib/supabase';
 import { detectRedZone } from '@/lib/redZone';
+import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -45,30 +46,33 @@ async function executePrompt(userPrompt) {
 
 export async function POST(req) {
   try {
-    const { userPrompt, levelId, playerId, taskDescription, goalDescription, brokenPrompt } = await req.json();
+    const { userPrompt, levelId } = await req.json();
 
     if (!userPrompt) {
       return Response.json({ error: 'Brak prompta' }, { status: 400 });
     }
-
-    let level = null;
-    if (levelId) {
-      const { data } = await getServiceClient()
-        .from('levels')
-        .select('module_id, code, title, task_description, goal_description, broken_prompt, config')
-        .eq('id', levelId)
-        .single();
-      level = data;
+    if (!levelId) {
+      return Response.json({ error: 'Brak ćwiczenia' }, { status: 400 });
     }
 
-    if (level?.config?.zones) {
+    const playerId = await sessionPlayerId();
+    const denied = await guardLevelAccess(playerId, levelId);
+    if (denied) return denied;
+
+    const { data: level } = await getServiceClient()
+      .from('levels')
+      .select('module_id, code, title, task_description, goal_description, broken_prompt, config')
+      .eq('id', levelId)
+      .single();
+
+    if (level.config?.zones) {
       return Response.json(await evaluateZones(userPrompt, level, playerId));
     }
 
     return Response.json(await evaluateScore(userPrompt, {
-      taskDescription: level?.task_description || taskDescription,
-      goalDescription: level?.goal_description || goalDescription,
-      brokenPrompt: level?.broken_prompt || brokenPrompt,
+      taskDescription: level.task_description,
+      goalDescription: level.goal_description,
+      brokenPrompt: level.broken_prompt,
     }));
   } catch (err) {
     console.error('Evaluate error:', err);

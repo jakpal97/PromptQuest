@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
-import { lockReasonOf, passMarkOf } from '@/lib/progress';
+import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName } from '@/lib/progress';
 import Character from '@/components/Character';
 import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, zoneBossLine, ZONES } from '@/components/ExercisePanels';
 
@@ -88,6 +88,10 @@ export default function BattlePage() {
   const [attempts, setAttempts] = useState({});
   const [modulePrompts, setModulePrompts] = useState({});
   const [libraryState, setLibraryState] = useState(null);
+  const [lockNotice, setLockNotice] = useState(null);
+  const [savedFeedback, setSavedFeedback] = useState({});
+  const [savedZones, setSavedZones] = useState({});
+  const [showLevelList, setShowLevelList] = useState(false);
 
   const textareaRef = useRef(null);
 
@@ -124,6 +128,7 @@ export default function BattlePage() {
     setAttackEffect(null);
     setShowFullResponse(false);
     setLibraryState(null);
+    setShowLevelList(false);
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -137,25 +142,40 @@ export default function BattlePage() {
     const { level: levelData } = await levelRes.json();
     if (!levelData) { router.push('/map'); return; }
 
+    const [allLevelsRes, scoresRes] = await Promise.all([
+      fetch(`/api/levels?moduleId=${levelData.module_id}`),
+      fetch(`/api/battles?playerId=${playerId}&moduleId=${levelData.module_id}`),
+    ]);
+    const allLevels = (allLevelsRes.ok && (await allLevelsRes.json()).levels) || [];
+    const scoresData = scoresRes.ok ? await scoresRes.json() : {};
+    const freshPlayer = playerRes.ok ? (await playerRes.json()).player : null;
+
+    const isAdmin = (freshPlayer?.role || sessionStorage.getItem('role')) === 'admin';
+    const mod = levelData.modules;
+    if (!isAdmin && mod?.day_number > 1 && !mod.unlocked) { router.replace('/map'); return; }
+    const lock = lockReasonOf(levelData, allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin);
+    if (lock) {
+      const target = nextPlayableLevel(allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin);
+      if (!target || target.id === levelData.id) { router.replace('/map'); return; }
+      sessionStorage.setItem('lockNotice', JSON.stringify({ levelId: target.id, text: lockMessageOf(lock, levelData, allLevels) }));
+      router.replace(`/battle/${target.id}`);
+      return;
+    }
+    const notice = JSON.parse(sessionStorage.getItem('lockNotice') || 'null');
+    if (notice?.levelId === levelData.id) setLockNotice(notice.text);
+    else { setLockNotice(null); sessionStorage.removeItem('lockNotice'); }
+
     setLevel(levelData);
-    setModule(levelData.modules);
+    setModule(mod);
+    setModuleLevels(allLevels);
+    setBestScores(scoresData.bestScores || {});
+    setAttempts(scoresData.attempts || {});
+    setModulePrompts(scoresData.prompts || {});
+    setSavedFeedback(scoresData.feedback || {});
+    setSavedZones(scoresData.zones || {});
 
-    const allLevelsRes = await fetch(`/api/levels?moduleId=${levelData.module_id}`);
-    if (allLevelsRes.ok) {
-      const { levels: allLevels } = await allLevelsRes.json();
-      setModuleLevels(allLevels || []);
-    }
-
-    const scoresRes = await fetch(`/api/battles?playerId=${playerId}&moduleId=${levelData.module_id}`);
-    if (scoresRes.ok) {
-      const { bestScores: scores, attempts: att, prompts } = await scoresRes.json();
-      setBestScores(scores || {});
-      setAttempts(att || {});
-      setModulePrompts(prompts || {});
-    }
-
-    if (playerRes.ok) {
-      const { player: playerData } = await playerRes.json();
+    if (freshPlayer) {
+      const playerData = freshPlayer;
       setPlayer(playerData);
       setLives(playerData.current_lives);
       setPlayerHp(Math.round((playerData.current_lives / 3) * 100));
@@ -193,16 +213,10 @@ export default function BattlePage() {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPrompt: prompt,
-          levelId: parseInt(levelId),
-          playerId: sessionStorage.getItem('playerId'),
-          taskDescription: level.task_description,
-          goalDescription: level.goal_description,
-          brokenPrompt: level.broken_prompt || null,
-        }),
+        body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId) }),
       });
       const data = await res.json();
+      if (res.status === 401) { expireSession(); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
       setResult(data);
       await animateAndSave(data);
@@ -257,12 +271,11 @@ export default function BattlePage() {
     }
     setTimeout(() => setAttackEffect(null), 1000);
 
-    const playerId = sessionStorage.getItem('playerId');
     const res = await fetch('/api/battle/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        playerId, levelId: parseInt(levelId),
+        levelId: parseInt(levelId),
         score: data.score, zone: data.zone || null, bonus: !!data.bonus,
         co_poszlo_dobrze: data.co_poszlo_dobrze,
         co_poprawic: data.co_poprawic, wskazowka: data.wskazowka,
@@ -270,9 +283,19 @@ export default function BattlePage() {
       }),
     });
     const savedData = await res.json();
+    if (res.status === 401) { expireSession(); return; }
+    if (!res.ok) {
+      setResult(r => ({ ...r, error: true, co_poprawic: savedData.error || 'Nie udało się zapisać próby.' }));
+      return;
+    }
     setSaved(savedData);
 
     const id = parseInt(levelId);
+    if (savedData.previousBest == null || data.score >= savedData.previousBest) {
+      setSavedZones(prev => ({ ...prev, [id]: data.zone || null }));
+      setSavedFeedback(prev => ({ ...prev, [id]: { co_poszlo_dobrze: data.co_poszlo_dobrze, co_poprawic: data.co_poprawic, wskazowka: data.wskazowka } }));
+      if (level.type !== 'blind_test') setModulePrompts(prev => ({ ...prev, [id]: prompt }));
+    }
     setBestScores(prev => ({ ...prev, [id]: Math.max(prev[id] ?? 0, data.score) }));
     if (savedData.attemptNumber) setAttempts(prev => ({ ...prev, [id]: savedData.attemptNumber }));
 
@@ -298,6 +321,11 @@ export default function BattlePage() {
       setPlayer(p => ({ ...p, total_xp: savedData.newTotalXp, current_lives: savedData.newLives }));
       sessionStorage.setItem('totalXp', savedData.newTotalXp);
     }
+  }
+
+  function expireSession() {
+    sessionStorage.clear();
+    router.push('/login');
   }
 
   function retry(newPrompt) {
@@ -359,7 +387,7 @@ export default function BattlePage() {
     return lockReason(lvl) !== null;
   }
 
-  if (loading) return (
+  if (loading || lockReason(level)) return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <span style={{ fontFamily: PIXEL, fontSize: 12, color: 'var(--accent)', animation: 'blink 1s steps(2) infinite' }}>WCHODZISZ DO ARENY...</span>
     </div>
@@ -396,43 +424,21 @@ export default function BattlePage() {
   const relatedLevel = cfg?.related_code ? moduleLevels.find(l => l.code === cfg.related_code) : null;
   const relatedPrompt = relatedLevel ? modulePrompts[relatedLevel.id] : null;
   const chips = [...PROMPT_BLOCKS, ...(cfg?.chips || []).map(c => ({ key: c.label, label: c.label, text: c.text }))];
-  const panelWidth = zoneMode ? 'clamp(360px, 44%, 620px)' : 'clamp(330px, 38%, 500px)';
-
-  const levelLock = lockReason(level);
-  if (levelLock) {
-    const required = moduleLevels[moduleLevels.findIndex(l => l.id === level.id) - 1];
-    return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24, textAlign: 'center' }}>
-        <div style={{ fontSize: 48 }}>🔒</div>
-        <div style={{ fontFamily: PIXEL, fontSize: 14, color: 'var(--gold)' }}>{exerciseLabel} JESZCZE ZAMKNIĘTE</div>
-        <div style={{ fontFamily: "'Rajdhani'", fontSize: 18, color: 'var(--white)', fontWeight: 600, maxWidth: 480 }}>
-          {levelLock === 'previous'
-            ? <>Najpierw zalicz {required?.label || (required?.code ? `ćwiczenie ${required.code}` : 'poprzednie zadanie')}{passMarkOf(required) === 90 ? ' na zielono' : ''}. To ćwiczenie otworzy się automatycznie.</>
-            : <>To ćwiczenie należy do bloku {level.block}. Trener odblokuje je, gdy przejdziemy do tej części szkolenia.</>}
-        </div>
-        {levelLock === 'previous' && required ? (
-          <button onClick={() => router.push(`/battle/${required.id}`)} className="pixel-button btn-primary">▶ PRZEJDŹ DO {(required.label || required.code || `zadania ${required.level_number}`).toUpperCase()}</button>
-        ) : (
-          <button onClick={() => router.push('/map')} className="pixel-button btn-primary">🗺 WRÓĆ NA MAPĘ</button>
-        )}
-      </div>
-    );
-  }
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', position: 'relative', background: '#0d0d20' }}>
+    <div className={`battle-root${zoneMode ? ' is-zone' : ''}`} style={{ background: '#0d0d20' }}>
 
       {roomBg && (
         <img
           src={roomBg}
           alt="Pokój"
-          className="pixel-art"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', zIndex: 0 }}
+          className="pixel-art battle-bg"
+          style={{ width: '100%', height: '100%', maxWidth: 'none', objectFit: 'cover', objectPosition: 'center top', zIndex: 0 }}
         />
       )}
 
-      <div style={{
-        position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
+      <div className="battle-shade" style={{
+        zIndex: 1, pointerEvents: 'none',
         background: 'linear-gradient(to right, rgba(5,5,18,0.85) 0%, rgba(5,5,18,0.65) 38%, rgba(5,5,18,0.1) 60%, transparent 75%)',
       }} />
 
@@ -474,7 +480,7 @@ export default function BattlePage() {
       )}
       {overlay === 'game-over' && (
         <Overlay color="var(--red)" title="💀 KONIEC ŻYĆ!" subtitle="Moduł zaczynasz od nowa — ale z nową wiedzą!">
-          <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', maxWidth: 460, textAlign: 'center', lineHeight: 1.5, fontWeight: 600 }}>
+          <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', maxWidth: '29rem', textAlign: 'center', lineHeight: 1.5, fontWeight: 600 }}>
             💡 Zanim zaczniesz: każdy prompt niech ma <b style={{ color: 'var(--gold)' }}>rolę, kontekst, zadanie i format</b>. To 4 klocki, za które dostajesz punkty.
           </div>
           <button autoFocus onClick={() => { setOverlay(null); router.push('/map'); }} className="pixel-button btn-danger">🔄 SPRÓBUJ PONOWNIE</button>
@@ -482,29 +488,28 @@ export default function BattlePage() {
       )}
 
       {/* ===== GÓRNY PASEK ===== */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
+      <div className="battle-topbar" style={{
         background: 'rgba(6,5,18,0.98)', borderBottom: '2px solid var(--border)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', height: 48 }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 52 }}>
           <button
             onClick={() => router.push('/map')}
             className="topbar-back"
             style={{
               background: 'rgba(30,20,60,0.95)', borderRight: '1px solid var(--border)',
-              fontFamily: PIXEL, fontSize: 8, padding: '0 14px', cursor: 'pointer', flexShrink: 0,
+              fontFamily: PIXEL, fontSize: 11, padding: '0 14px', minHeight: 44, cursor: 'pointer', flexShrink: 0,
             }}
           >← MAPA</button>
 
-          <div style={{ flex: 1, padding: '7px 14px 7px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontFamily: PIXEL, fontSize: 9, color: 'var(--green)' }}>{player?.display_name || 'TY'}</span>
+          <div style={{ flex: 1, minWidth: 0, padding: '7px 14px 7px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '2px 10px' }}>
+              <span style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: 'var(--green)' }}>{player?.display_name || 'TY'}</span>
               {livesEnabled ? (
                 <div style={{ display: 'flex', gap: 2 }} title="Życia — tracisz jedno przy wyniku poniżej 40">
-                  {[0, 1, 2].map(i => <span key={i} style={{ fontSize: 14, opacity: i < lives ? 1 : 0.15, filter: i < lives ? 'none' : 'grayscale(1)', transition: 'opacity 0.3s' }}>❤️</span>)}
+                  {[0, 1, 2].map(i => <span key={i} style={{ fontSize: 16, opacity: i < lives ? 1 : 0.15, filter: i < lives ? 'none' : 'grayscale(1)', transition: 'opacity 0.3s' }}>❤️</span>)}
                 </div>
               ) : (
-                <span style={{ fontFamily: "'Rajdhani'", fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>🛡 Dziś bez utraty życia · {player?.total_xp || 0} XP</span>
+                <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--green)' }}>🛡 Dziś bez utraty życia · {player?.total_xp || 0} XP</span>
               )}
             </div>
             <div className="hp-bar"><div className="hp-fill hp-fill-player" style={{ width: `${playerHp}%` }} /></div>
@@ -514,18 +519,18 @@ export default function BattlePage() {
             <span style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--gold)', textShadow: '0 0 10px rgba(247,200,79,0.6)' }}>VS</span>
           </div>
 
-          <div style={{ flex: 1, padding: '7px 12px 7px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
+          <div style={{ flex: 1, minWidth: 0, padding: '7px 12px 7px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-              <span style={{ fontFamily: PIXEL, fontSize: 9, color: 'var(--red)' }}>{module?.boss_name}</span>
+              <span style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: 'var(--red)', textAlign: 'right' }}>{module?.boss_name}</span>
             </div>
             <div className="hp-bar"><div className="hp-fill hp-fill-boss" style={{ width: `${bossHp}%` }} /></div>
           </div>
         </div>
 
         {moduleLevels.length > 0 && (
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontFamily: PIXEL, fontSize: 7, color: 'var(--muted)', flexShrink: 0 }}>{module?.title}</span>
-            <div style={{ display: 'flex', gap: 6, flex: 1, justifyContent: 'center' }}>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '6px 14px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 12px' }}>
+            <span style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', flex: '0 1 auto' }}>{module?.title}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flex: '1 1 auto', justifyContent: 'center' }}>
               {moduleLevels.map(lvl => {
                 const isCurrent = lvl.id === parseInt(levelId);
                 const score = bestScores[lvl.id];
@@ -545,46 +550,59 @@ export default function BattlePage() {
                     <button
                       onClick={() => !locked && !isCurrent && router.push(`/battle/${lvl.id}`)}
                       disabled={locked}
-                      title={lock === 'block' ? 'Odblokuje trener' : lock === 'previous' ? 'Najpierw zalicz poprzednie ćwiczenie' : `${lvl.label || (lvl.code ? `Ćwiczenie ${lvl.code}` : `Zadanie ${lvl.level_number}`)}${lvl.title ? ` — ${lvl.title}` : ''}`}
+                      title={locked ? lockMessageOf(lock, lvl, moduleLevels) : levelName(lvl)}
+                      aria-label={locked ? `${levelName(lvl)} — zablokowane. ${lockMessageOf(lock, lvl, moduleLevels)}` : levelName(lvl)}
                       style={{
-                        minWidth: lvl.code ? 34 : 24, height: 24, padding: '0 4px', background: dotBg, border: `1.5px solid ${dotBorder}`, borderRadius: 12,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: dotShadow,
-                        fontFamily: PIXEL, fontSize: 8, color: dotColor, cursor: locked ? 'not-allowed' : isCurrent ? 'default' : 'pointer',
+                        minWidth: 44, height: 44, padding: '0 8px', background: dotBg, border: `1.5px solid ${dotBorder}`, borderRadius: 22,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: dotShadow, whiteSpace: 'nowrap',
+                        fontFamily: PIXEL, fontSize: 11, color: dotColor, cursor: locked ? 'not-allowed' : isCurrent ? 'default' : 'pointer',
                         opacity: locked ? 0.4 : 1,
                       }}
                     >
-                      {locked ? '🔒' : isDone && !isCurrent ? `✓${lvl.code ? ` ${label}` : ''}` : label}
+                      {locked ? `🔒${lvl.code ? ` ${label}` : ''}` : isDone && !isCurrent ? `✓${lvl.code ? ` ${label}` : ''}` : label}
                     </button>
                   </div>
                 );
               })}
             </div>
-            <span style={{ fontFamily: PIXEL, fontSize: 7, color: 'var(--muted)', flexShrink: 0 }}>
-              {moduleLevels.filter(l => (bestScores[l.id] ?? 0) >= passMark).length}/{moduleLevels.length}
-            </span>
+            <button
+              onClick={() => setShowLevelList(s => !s)}
+              aria-expanded={showLevelList}
+              className="chip-button"
+              style={{ fontFamily: PIXEL, fontSize: 11, flexShrink: 0 }}
+            >
+              📋 {moduleLevels.filter(l => (bestScores[l.id] ?? 0) >= passMark).length}/{moduleLevels.length} {showLevelList ? '▲' : '▼'}
+            </button>
           </div>
+        )}
+        {showLevelList && (
+          <LevelList
+            levels={moduleLevels}
+            currentId={id}
+            bestScores={bestScores}
+            lockReason={lockReason}
+            onOpen={(lvl) => { setShowLevelList(false); if (lvl.id !== id) router.push(`/battle/${lvl.id}`); }}
+          />
         )}
       </div>
 
+      <div className="battle-stage">
       {/* ===== LEWY PANEL ===== */}
-      <div style={{
-        position: 'absolute', top: moduleLevels.length > 0 ? 86 : 48, left: 0, bottom: 0,
-        width: panelWidth, zIndex: 30,
-        display: 'flex', flexDirection: 'column', padding: '14px 16px 18px', gap: 12,
-        overflowY: 'auto', background: 'rgba(6,4,20,0.82)', backdropFilter: 'blur(8px)',
+      <div className="battle-panel" style={{
+        background: 'rgba(6,4,20,0.82)', backdropFilter: 'blur(8px)',
         borderRight: '1px solid rgba(79,142,247,0.15)',
       }}>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{
-            fontFamily: PIXEL, fontSize: 8, color: typeColor, background: 'rgba(10,10,26,0.9)',
+            fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: typeColor, background: 'rgba(10,10,26,0.9)',
             border: `1px solid ${typeColor}`, padding: '6px 10px', borderRadius: 2,
           }}>
             {zoneMode
               ? <>{cfg.boss ? '👑 ' : ''}{exerciseLabel} · {'⭐'.repeat(cfg.difficulty || 1)} · {cfg.duration}</>
               : <>ZADANIE {level?.level_number}/{module?.total_levels} · {level?.type === 'solo' ? '⚡ SOLO' : level?.type === 'fix_prompt' ? '🔧 NAPRAW PROMPT' : '👁 ZGADNIJ AI'}</>}
           </div>
-          <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, color: 'var(--muted)' }}>
+          <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)' }}>
             {zoneMode
               ? <><span style={{ color: 'var(--gold)' }}>{level.xp_reward} XP</span>{cfg.bonus ? <> + bonus <span style={{ color: 'var(--gold)' }}>{cfg.bonus.xp}</span></> : null}</>
               : personalBest !== undefined
@@ -594,7 +612,23 @@ export default function BattlePage() {
         </div>
 
         {zoneMode && (
-          <div style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--white)', lineHeight: 1.5 }}>{level.title}</div>
+          <div style={{ fontFamily: PIXEL, fontSize: 12, color: 'var(--white)', lineHeight: 1.6 }}>{level.title}</div>
+        )}
+
+        {lockNotice && (
+          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'rgba(247,200,79,0.1)', border: '1px solid var(--gold)', borderRadius: 4, padding: '10px 12px', fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#f3e3b0', lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>🔒 {lockNotice}</span>
+            <button onClick={() => { setLockNotice(null); sessionStorage.removeItem('lockNotice'); }} className="chip-button" aria-label="Zamknij komunikat" style={{ flexShrink: 0 }}>✕</button>
+          </div>
+        )}
+
+        {!result && passedHere && (
+          <PassedAttempt
+            zone={savedZones[id]}
+            score={bestScores[id]}
+            prompt={level.type === 'blind_test' ? null : modulePrompts[id]}
+            feedback={savedFeedback[id]}
+          />
         )}
 
         {/* ---------- ZADANIE + INPUT ---------- */}
@@ -615,7 +649,7 @@ export default function BattlePage() {
               {level?.type === 'fix_prompt' && level?.broken_prompt && (
                 <div style={{ marginTop: 10, background: 'rgba(247,79,79,0.1)', border: '1px solid var(--red)', padding: '8px 12px', borderRadius: 3 }}>
                   <SectionLabel color="var(--red)">❌ ZŁY PROMPT DO POPRAWY</SectionLabel>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: '#ff9999', fontStyle: 'italic', fontWeight: 600 }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: '#ff9999', fontStyle: 'italic', fontWeight: 600 }}>
                     „{level.broken_prompt}”
                   </div>
                 </div>
@@ -623,7 +657,7 @@ export default function BattlePage() {
               {level?.type !== 'blind_test' && level?.goal_description && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)' }}>
                   <SectionLabel color="var(--gold)">🎯 SZEF OCENI, CZY:</SectionLabel>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, color: '#f3e3b0', lineHeight: 1.5, fontWeight: 600 }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: '#f3e3b0', lineHeight: 1.5, fontWeight: 600 }}>
                     {level.goal_description}
                   </div>
                 </div>
@@ -650,53 +684,59 @@ export default function BattlePage() {
                 </div>}
 
                 {lastAttempt && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 600, color: 'var(--muted)' }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 600, color: 'var(--muted)' }}>
                     {lastAttempt.zone
                       ? <>Poprzednia próba: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> — popraw prompt i wejdź wyżej!</>
                       : <>Poprzednia próba: <span style={{ color: scoreColorOf(lastAttempt.score) }}>{lastAttempt.score}/100</span> — popraw prompt i pobij ten wynik!</>}
                   </div>
                 )}
-
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <textarea
-                    ref={textareaRef}
-                    value={prompt}
-                    onChange={e => setPrompt(e.target.value)}
-                    readOnly={evaluating}
-                    autoFocus
-                    placeholder={'Napisz prompt tak, jakbyś zlecał zadanie nowemu asystentowi…\n\nWskazówka: użyj klocków powyżej.'}
-                    rows={7}
-                    className="prompt-input"
-                    style={{ opacity: evaluating ? 0.6 : 1 }}
-                    onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleAttack(); } }}
-                  />
-                  <div style={{
-                    position: 'absolute', right: 10, bottom: 8, fontFamily: "'Rajdhani'", fontSize: 13, fontWeight: 700,
-                    color: wordCount >= 30 ? 'var(--green)' : wordCount >= 12 ? 'var(--gold)' : 'var(--muted)', pointerEvents: 'none',
-                  }}>
-                    {wordCount} słów
-                  </div>
-                </div>
-                {redZoneHits.length > 0 && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, color: '#ff9999', background: 'rgba(247,79,79,0.12)', border: '1px solid var(--red)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
-                    🚫 Wygląda na dane z czerwonej strefy: {redZoneHits.join(', ')}. Zamień je na placeholder — taki prompt nie zostanie wysłany do AI.
-                  </div>
-                )}
               </>
             )}
 
-            {evaluating ? (
-              <EvaluatingPanel stage={evalStage} bossName={module?.boss_name} tip={LOADING_TIPS[tipIndex]} isBlind={level?.type === 'blind_test'} />
-            ) : (
-              <button
-                onClick={handleAttack}
-                disabled={(!prompt.trim() && level?.type !== 'blind_test') || (level?.type === 'blind_test' && !blindAnswer)}
-                className="pixel-button btn-primary attack-button"
-              >
-                {level?.type === 'blind_test' ? '👁  SPRAWDŹ' : '⚔  ATAKUJ PROMPTEM'}
-                {level?.type !== 'blind_test' && <span style={{ display: 'block', fontFamily: "'Rajdhani'", fontSize: 12, marginTop: 4, letterSpacing: 0, opacity: 0.75 }}>Ctrl / ⌘ + Enter</span>}
-              </button>
-            )}
+            <div className="battle-composer">
+              {level?.type !== 'blind_test' && (
+                <>
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <textarea
+                      ref={textareaRef}
+                      value={prompt}
+                      onChange={e => setPrompt(e.target.value)}
+                      readOnly={evaluating}
+                      autoFocus
+                      placeholder={'Napisz prompt tak, jakbyś zlecał zadanie nowemu asystentowi…\n\nWskazówka: użyj klocków powyżej.'}
+                      rows={7}
+                      className="prompt-input"
+                      style={{ opacity: evaluating ? 0.6 : 1 }}
+                      onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleAttack(); } }}
+                    />
+                    <div style={{
+                      position: 'absolute', right: 12, bottom: 6, fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700,
+                      color: wordCount >= 30 ? 'var(--green)' : wordCount >= 12 ? 'var(--gold)' : 'var(--muted)', pointerEvents: 'none',
+                    }}>
+                      {wordCount} słów
+                    </div>
+                  </div>
+                  {redZoneHits.length > 0 && (
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#ff9999', background: 'rgba(247,79,79,0.12)', border: '1px solid var(--red)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
+                      🚫 Wygląda na dane z czerwonej strefy: {redZoneHits.join(', ')}. Zamień je na placeholder — taki prompt nie zostanie wysłany do AI.
+                    </div>
+                  )}
+                </>
+              )}
+
+              {evaluating ? (
+                <EvaluatingPanel stage={evalStage} bossName={module?.boss_name} tip={LOADING_TIPS[tipIndex]} isBlind={level?.type === 'blind_test'} />
+              ) : (
+                <button
+                  onClick={handleAttack}
+                  disabled={(!prompt.trim() && level?.type !== 'blind_test') || (level?.type === 'blind_test' && !blindAnswer)}
+                  className="pixel-button btn-primary attack-button"
+                >
+                  {level?.type === 'blind_test' ? '👁  SPRAWDŹ' : '⚔  ATAKUJ PROMPTEM'}
+                  {level?.type !== 'blind_test' && <span style={{ display: 'block', fontFamily: "'Rajdhani'", fontSize: 16, lineHeight: 1.2, marginTop: 4, letterSpacing: 0, opacity: 0.75 }}>Ctrl / ⌘ + Enter</span>}
+                </button>
+              )}
+            </div>
           </>
         )}
 
@@ -706,7 +746,7 @@ export default function BattlePage() {
             {zoneMode && !result.error ? (
               <>
                 {lastAttempt?.zone && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, color: 'var(--muted)' }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)' }}>
                     Poprzednio: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> → teraz: <span style={{ color: ZONES[result.zone].color }}>{ZONES[result.zone].label.toLowerCase()}</span>
                   </div>
                 )}
@@ -715,23 +755,23 @@ export default function BattlePage() {
             ) : (
             <div style={{
               background: 'rgba(10,8,28,0.96)', border: `2px solid ${scoreColor}`, borderRadius: 4, padding: '14px 16px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, flexShrink: 0,
               boxShadow: `0 0 24px ${scoreColor}33`, animation: 'pop-in 0.35s cubic-bezier(.34,1.56,.64,1)',
             }}>
               <div>
-                <div style={{ fontFamily: PIXEL, fontSize: 8, color: 'var(--muted)', marginBottom: 6 }}>WYNIK</div>
+                <div style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>WYNIK</div>
                 <div style={{ fontFamily: PIXEL, fontSize: 28, color: scoreColor }}>{displayScore}<span style={{ fontSize: 12, color: 'var(--muted)' }}>/100</span></div>
                 {lastAttempt && !result.error && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, marginTop: 6, color: result.score > lastAttempt.score ? 'var(--green)' : result.score < lastAttempt.score ? 'var(--red)' : 'var(--muted)' }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginTop: 6, color: result.score > lastAttempt.score ? 'var(--green)' : result.score < lastAttempt.score ? 'var(--red)' : 'var(--muted)' }}>
                     {result.score > lastAttempt.score ? '▲' : result.score < lastAttempt.score ? '▼' : '='} {result.score - lastAttempt.score >= 0 ? '+' : ''}{result.score - lastAttempt.score} vs poprzednia próba
                   </div>
                 )}
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: PIXEL, fontSize: 11, color: scoreColor }}>
+                <div style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: scoreColor }}>
                   {result.error ? '⚠ BŁĄD' : result.score >= 70 ? '⚡ ŚWIETNY!' : result.score >= 40 ? '⚔ ZALICZONE' : '💀 PUDŁO!'}
                 </div>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, fontWeight: 700, marginTop: 6, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginTop: 6, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
                   {result.error ? '' : !saved ? 'zapisywanie…'
                     : xpGained > 0 ? `+${xpGained} XP`
                     : saved.practice ? 'trening — pobij rekord, by zdobyć XP'
@@ -750,10 +790,10 @@ export default function BattlePage() {
             {result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
               <div style={{ background: 'rgba(79,247,160,0.06)', border: '1px dashed var(--green)', borderRadius: 4, padding: '10px 12px' }}>
                 <SectionLabel color="var(--green)">✨ PRZYKŁAD LEPSZEGO PROMPTA</SectionLabel>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: 'var(--white)', lineHeight: 1.5, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
                   {result.lepszy_prompt}
                 </div>
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                   <button onClick={() => retry(result.lepszy_prompt)} className="chip-button" style={{ borderColor: 'var(--green)', color: 'var(--green)' }}>✏️ Użyj jako bazy</button>
                   <button onClick={copyBetterPrompt} className="chip-button">{copied ? '✓ Skopiowano' : '📋 Kopiuj'}</button>
                 </div>
@@ -761,9 +801,9 @@ export default function BattlePage() {
             )}
 
             {level?.type !== 'blind_test' && prompt && (
-              <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '8px 12px' }}>
-                <summary style={{ fontFamily: PIXEL, fontSize: 8, color: 'var(--muted)', cursor: 'pointer' }}>TWÓJ PROMPT</summary>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, color: 'var(--white)', lineHeight: 1.5, marginTop: 8, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
+              <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '0 12px' }}>
+                <summary className="fold-summary" style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.6, color: 'var(--muted)', cursor: 'pointer' }}>TWÓJ PROMPT</summary>
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, marginBottom: 10, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
               </details>
             )}
 
@@ -777,7 +817,7 @@ export default function BattlePage() {
                 >
                   {libraryState === 'saved' ? '✓ Zapisano w bibliotece' : libraryState === 'saving' ? 'Zapisuję…' : '💾 Zapisz prompt w bibliotece'}
                 </button>
-                {libraryState === 'error' && <span style={{ fontFamily: "'Rajdhani'", color: 'var(--red)', fontWeight: 600 }}>Nie udało się zapisać — spróbuj ponownie.</span>}
+                {libraryState === 'error' && <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--red)', fontWeight: 600 }}>Nie udało się zapisać — spróbuj ponownie.</span>}
               </div>
             )}
 
@@ -788,7 +828,7 @@ export default function BattlePage() {
             )}
 
             {zoneMode && cfg.footer && result.zone === 'green' && (
-              <div style={{ fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 600, color: '#cfd3ff', borderLeft: '3px solid var(--accent)', padding: '4px 10px' }}>
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 600, color: '#cfd3ff', borderLeft: '3px solid var(--accent)', padding: '4px 10px' }}>
                 📌 {cfg.footer}
               </div>
             )}
@@ -797,13 +837,13 @@ export default function BattlePage() {
               <div style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(79,142,247,0.3)', borderRadius: 4, padding: '10px 12px' }}>
                 <SectionLabel color="var(--accent)">🤖 {level?.type === 'blind_test' ? 'ODPOWIEDŹ' : zoneMode ? 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM' : 'CO AI ZROBIŁA Z TWOIM PROMPTEM'}</SectionLabel>
                 {zoneMode && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)', fontWeight: 600, marginTop: -4, marginBottom: 8 }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)', fontWeight: 600, marginTop: -4, marginBottom: 8 }}>
                     Ocena dotyczy Twojego prompta. Placeholdery mogą sprawić, że wynik będzie ogólny — to w porządku.
                   </div>
                 )}
                 <div style={{
-                  fontFamily: "'Rajdhani'", fontSize: 14, color: 'var(--white)', lineHeight: 1.55, fontWeight: 500,
-                  whiteSpace: 'pre-wrap', maxHeight: showFullResponse ? 'none' : 160, overflow: 'hidden', position: 'relative',
+                  fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.55, fontWeight: 500,
+                  whiteSpace: 'pre-wrap', maxHeight: showFullResponse ? 'none' : '11rem', overflow: 'hidden', position: 'relative',
                 }}>
                   {result.aiResponse}
                   {!showFullResponse && result.aiResponse.length > 400 && (
@@ -818,23 +858,23 @@ export default function BattlePage() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0, position: 'sticky', bottom: -18, padding: '10px 0 4px', background: 'linear-gradient(transparent, rgba(6,4,20,0.95) 30%)' }}>
+            <div className="battle-actions" style={{ background: 'linear-gradient(transparent, rgba(6,4,20,0.95) 30%)' }}>
               {!overlay && ((zoneMode ? !(result.zone === 'green' && result.bonus) : result.score < 70) || result.error) && (
-                <button onClick={() => retry()} className="pixel-button" style={{ flex: 1, fontSize: 9, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
+                <button onClick={() => retry()} className="pixel-button" style={{ fontSize: 11, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
                   {level?.type === 'blind_test' ? '🔄 JESZCZE RAZ' : zoneMode && result.zone === 'green' ? '⭐ POWALCZ O BONUS' : zoneMode ? '✏️ NOWA PRÓBA' : '✏️ POPRAW PROMPT'}
                 </button>
               )}
               {nextLevel && !nextLocked && (zoneMode ? result.zone === 'green' : result.score >= 40) && !result.error && (
-                <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ flex: 1, fontSize: 9, padding: '12px 8px' }}>
+                <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 8px' }}>
                   {nextLevel.code ? `DALEJ: ${nextLevel.label || nextLevel.code} ▶` : 'NASTĘPNE ▶'}
                 </button>
               )}
               {nextLevel && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' : result.score >= 40) && !result.error && (
-                <div style={{ flex: 1, fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
                   🔒 {nextLevel.label || nextLevel.code || 'Następne'} odblokuje trener
                 </div>
               )}
-              <button onClick={() => router.push('/map')} className="pixel-button" style={{ flex: '0 0 auto', fontSize: 9, padding: '12px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+              <button onClick={() => router.push('/map')} className="pixel-button battle-actions-map" style={{ fontSize: 11, padding: '12px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
                 🗺 MAPA
               </button>
             </div>
@@ -842,6 +882,8 @@ export default function BattlePage() {
         )}
       </div>
 
+      {/* ===== SCENA ===== */}
+      <div className="battle-scene">
       {floatingText && (
         <div style={{
           position: 'absolute', top: '30%', left: '65%', transform: 'translateX(-50%)',
@@ -862,51 +904,48 @@ export default function BattlePage() {
       )}
 
       {/* ===== GRACZ ===== */}
-      <div style={{
-        position: 'absolute', bottom: '20%', left: zoneMode ? '51%' : '43%',
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        animation: shakeTarget === 'player' ? 'shake 0.6s ease-out' : 'none', zIndex: 10,
+      <div className="battle-fighter battle-fighter--player" style={{
+        animation: shakeTarget === 'player' ? 'shake 0.6s ease-out' : 'none',
       }}>
         <Character characterId={player?.character_id} size={14} animate />
         <div style={{
-          fontFamily: PIXEL, fontSize: 8, color: 'var(--green)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
+          fontFamily: PIXEL, fontSize: 11, color: 'var(--green)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
           border: '2px solid var(--green)', whiteSpace: 'nowrap', marginTop: 4, boxShadow: '0 0 8px rgba(79,247,160,0.3)',
         }}>{player?.display_name || 'TY'}</div>
       </div>
 
       {/* ===== SZEF ===== */}
-      <div style={{
-        position: 'absolute', bottom: '14%', left: zoneMode ? '76%' : '72%',
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        animation: shakeTarget === 'boss' ? 'shake 0.6s ease-out' : evaluating ? 'boss-think 1.2s ease-in-out infinite' : 'none', zIndex: 10,
+      <div className="battle-fighter battle-fighter--boss" style={{
+        animation: shakeTarget === 'boss' ? 'shake 0.6s ease-out' : evaluating ? 'boss-think 1.2s ease-in-out infinite' : 'none',
       }}>
         <Character characterId={module?.boss_character_id} size={14} animate flipped />
         <div style={{
-          fontFamily: PIXEL, fontSize: 8, color: 'var(--accent2)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
+          fontFamily: PIXEL, fontSize: 11, color: 'var(--accent2)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
           border: '2px solid var(--accent2)', whiteSpace: 'nowrap', marginTop: 4, boxShadow: '0 0 8px rgba(247,79,142,0.3)',
         }}>{module?.boss_name}</div>
       </div>
 
       {/* ===== DYMEK SZEFA ===== */}
-      <div key={bossLine} style={{
-        position: 'absolute', bottom: 'calc(14% + 230px)', right: '4%',
-        maxWidth: zoneMode ? 'clamp(240px, 30%, 420px)' : 'clamp(260px, 34%, 440px)', background: 'rgba(8,4,24,0.97)',
+      <div key={bossLine} className="battle-bubble" style={{
+        background: 'rgba(8,4,24,0.97)',
         border: `2px solid ${result && !result.error ? scoreColor : 'var(--accent2)'}`, borderRadius: 4,
-        padding: '14px 18px', zIndex: 25,
+        padding: '14px 18px',
         boxShadow: '0 0 24px rgba(247,79,142,0.2), 0 8px 32px rgba(0,0,0,0.95)',
         animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
       }}>
-        <div style={{
+        <div className="battle-bubble-tail" style={{
           position: 'absolute', bottom: -11, right: '18%', width: 0, height: 0,
           borderLeft: '11px solid transparent', borderRight: '11px solid transparent',
           borderTop: `11px solid ${result && !result.error ? scoreColor : 'var(--accent2)'}`,
         }} />
-        <div style={{ fontFamily: PIXEL, fontSize: 8, color: 'var(--accent2)', marginBottom: 8, letterSpacing: 1 }}>
+        <div style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: 'var(--accent2)', marginBottom: 8, letterSpacing: 1 }}>
           {module?.boss_name} · {module?.boss_title}
         </div>
-        <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.6, fontWeight: 600 }}>
+        <div className="battle-bubble-body" style={{ fontFamily: "'Rajdhani'", fontSize: 18, color: 'var(--white)', lineHeight: 1.6, fontWeight: 600 }}>
           „{bossLine}”
         </div>
+      </div>
+      </div>
       </div>
     </div>
   );
@@ -916,7 +955,7 @@ export default function BattlePage() {
 
 function SectionLabel({ color, children }) {
   return (
-    <div style={{ fontFamily: PIXEL, fontSize: 8, color, marginBottom: 8, letterSpacing: 0.5, lineHeight: 1.5 }}>
+    <div style={{ fontFamily: PIXEL, fontSize: 11, color, marginBottom: 8, letterSpacing: 0.5, lineHeight: 1.6 }}>
       {children}
     </div>
   );
@@ -933,7 +972,7 @@ function EvaluatingPanel({ stage, bossName, tip, isBlind }) {
         const active = i === stage;
         return (
           <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, opacity: done || active ? 1 : 0.4 }}>
-            <span style={{ fontFamily: PIXEL, fontSize: 10, color: done ? 'var(--green)' : 'var(--accent)', width: 16 }}>
+            <span style={{ fontFamily: PIXEL, fontSize: 11, color: done ? 'var(--green)' : 'var(--accent)', width: 16, flexShrink: 0 }}>
               {done ? '✓' : active ? <span style={{ animation: 'blink 0.8s steps(2) infinite' }}>▶</span> : '·'}
             </span>
             <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--white)' }}>
@@ -942,7 +981,7 @@ function EvaluatingPanel({ stage, bossName, tip, isBlind }) {
           </div>
         );
       })}
-      <div style={{ marginTop: 6, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)', fontFamily: "'Rajdhani'", fontSize: 14, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5 }}>
+      <div style={{ marginTop: 6, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)', fontFamily: "'Rajdhani'", fontSize: 16, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5 }}>
         💡 {tip}
       </div>
     </div>
@@ -953,13 +992,13 @@ function CriteriaBars({ kryteria }) {
   return (
     <div style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '10px 12px' }}>
       <SectionLabel color="var(--muted)">📊 PUNKTY ZA KLOCKI PROMPTA</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(11rem, 100%), 1fr))', gap: '8px 14px' }}>
         {CRITERIA.map((c, i) => {
           const v = kryteria[c.key] ?? 0;
           const color = v >= 18 ? 'var(--green)' : v >= 10 ? 'var(--gold)' : 'var(--red)';
           return (
             <div key={c.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Rajdhani'", fontSize: 14, fontWeight: 700, marginBottom: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0 8px', fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginBottom: 3 }}>
                 <span style={{ color: 'var(--white)' }}>{c.icon} {c.label}</span>
                 <span style={{ color }}>{v}/25</span>
               </div>
@@ -978,20 +1017,22 @@ function Overlay({ color, title, subtitle, children }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(10,10,26,0.95)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 24,
+      display: 'flex', overflowY: 'auto', padding: 24,
     }}>
-      <div style={{
-        fontFamily: PIXEL, fontSize: 'clamp(16px,3vw,28px)', color, textShadow: `0 0 24px ${color}`,
-        textAlign: 'center', animation: 'level-up-appear 0.4s ease-out',
-      }}>
-        {title}
-      </div>
-      {subtitle && (
-        <div style={{ fontFamily: "'Rajdhani'", fontSize: 22, color: 'var(--white)', textAlign: 'center', fontWeight: 600 }}>
-          {subtitle}
+      <div style={{ margin: 'auto', maxWidth: '40rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+        <div style={{
+          fontFamily: PIXEL, fontSize: 'clamp(16px,3vw,28px)', lineHeight: 1.5, color, textShadow: `0 0 24px ${color}`,
+          textAlign: 'center', animation: 'level-up-appear 0.4s ease-out',
+        }}>
+          {title}
         </div>
-      )}
-      {children}
+        {subtitle && (
+          <div style={{ fontFamily: "'Rajdhani'", fontSize: 22, color: 'var(--white)', textAlign: 'center', fontWeight: 600 }}>
+            {subtitle}
+          </div>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
@@ -1012,10 +1053,10 @@ function BlindTestInput({ options, blindAnswer, setBlindAnswer, disabled }) {
             transition: 'all 0.15s', transform: blindAnswer === opt.key ? 'scale(1.01)' : 'none',
           }}
         >
-          <div style={{ fontFamily: PIXEL, fontSize: 8, color: blindAnswer === opt.key ? 'var(--accent2)' : 'var(--muted)', marginBottom: 8 }}>
+          <div style={{ fontFamily: PIXEL, fontSize: 11, color: blindAnswer === opt.key ? 'var(--accent2)' : 'var(--muted)', marginBottom: 8 }}>
             {blindAnswer === opt.key ? '▶ ' : ''}ODPOWIEDŹ {opt.label}
           </div>
-          <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, lineHeight: 1.5, fontWeight: 600 }}>
+          <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, lineHeight: 1.5, fontWeight: 600 }}>
             {opt.text}
           </div>
         </button>
@@ -1024,11 +1065,70 @@ function BlindTestInput({ options, blindAnswer, setBlindAnswer, disabled }) {
   );
 }
 
+function LevelList({ levels, currentId, bestScores, lockReason, onOpen }) {
+  return (
+    <ul style={{ listStyle: 'none', margin: 0, padding: '6px 14px 10px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'grid', gap: 4, maxHeight: '50vh', overflowY: 'auto' }}>
+      {levels.map(lvl => {
+        const lock = lockReason(lvl);
+        const done = isPassed(lvl, bestScores);
+        const current = lvl.id === currentId;
+        const color = lock ? 'var(--muted)' : current ? 'var(--accent)' : done ? 'var(--green)' : 'var(--white)';
+        return (
+          <li key={lvl.id}>
+            <button
+              onClick={() => !lock && onOpen(lvl)}
+              disabled={!!lock}
+              aria-current={current ? 'true' : undefined}
+              style={{
+                width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                background: current ? 'rgba(79,142,247,0.12)' : 'rgba(15,12,36,0.9)', border: `1px solid ${current ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 4, padding: '6px 10px', cursor: lock ? 'not-allowed' : 'pointer', opacity: lock ? 0.75 : 1,
+              }}
+            >
+              <span style={{ width: 22, flexShrink: 0, textAlign: 'center' }}>{lock ? '🔒' : done ? '✅' : current ? '▶' : '•'}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color }}>{levelName(lvl)}</span>
+                {lock && (
+                  <span style={{ display: 'block', fontFamily: "'Rajdhani'", fontSize: 15, fontWeight: 600, color: 'var(--gold)' }}>
+                    {lockMessageOf(lock, lvl, levels)}
+                  </span>
+                )}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function PassedAttempt({ zone, score, prompt, feedback }) {
+  const z = ZONES[zone];
+  return (
+    <details style={{ background: 'rgba(79,247,160,0.06)', border: '1px solid var(--green)', borderRadius: 4, padding: '0 12px' }}>
+      <summary className="fold-summary" style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.6, color: 'var(--green)', cursor: 'pointer' }}>
+        ✅ ZALICZONE — TWOJE NAJLEPSZE PODEJŚCIE {z ? `· ${z.label}` : `· ${score}/100`}
+      </summary>
+      <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+        {prompt && (
+          <div>
+            <SectionLabel color="var(--muted)">TWÓJ PROMPT</SectionLabel>
+            <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
+          </div>
+        )}
+        <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={feedback?.co_poszlo_dobrze} color="var(--green)" />
+        <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={feedback?.co_poprawic} color="var(--red)" />
+        <FeedbackBox icon="💡" label="WSKAZÓWKA" text={feedback?.wskazowka} color="var(--gold)" />
+      </div>
+    </details>
+  );
+}
+
 function FeedbackBox({ icon, label, text, color }) {
   return (
     <div style={{ background: 'rgba(10,10,26,0.95)', borderTop: `1px solid ${color}55`, borderRight: `1px solid ${color}55`, borderBottom: `1px solid ${color}55`, borderLeft: `3px solid ${color}`, borderRadius: 4, padding: '10px 12px' }}>
       <SectionLabel color={color}>{icon} {label}</SectionLabel>
-      <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: 'var(--white)', lineHeight: 1.5, fontWeight: 600 }}>
+      <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, fontWeight: 600 }}>
         {text || '—'}
       </div>
     </div>

@@ -27,6 +27,7 @@ html, body {
   font-family: 'Rajdhani', sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* ===================== PIXEL ART ===================== */
@@ -182,9 +183,11 @@ html, body {
 /* ===================== UI COMPONENTS ===================== */
 .chip-button {
   font-family: 'Rajdhani', sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
-  padding: 5px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  line-height: 1.2;
   background: rgba(15, 12, 36, 0.95);
   border: 1px solid rgba(79, 142, 247, 0.4);
   border-radius: 3px;
@@ -221,7 +224,11 @@ html, body {
   line-height: 1.55;
   resize: vertical;
   outline: none;
-  min-height: 150px;
+  field-sizing: content;
+  /* 6 linii + padding + ramka; pole rośnie z tekstem do ok. 40% wysokości okna */
+  min-height: calc(6lh + 40px);
+  max-height: max(calc(6lh + 40px), 40dvh);
+  overflow-y: auto;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -234,8 +241,8 @@ html, body {
 
 .attack-button {
   width: 100%;
-  font-size: 12px;
-  padding: 14px;
+  font-size: 13px;
+  padding: 12px 14px;
   letter-spacing: 2px;
   flex-shrink: 0;
 }
@@ -257,7 +264,9 @@ html, body {
 
 .pixel-button {
   font-family: 'Press Start 2P', monospace;
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  min-height: 44px;
   padding: 12px 20px;
   border: 2px solid currentColor;
   cursor: pointer;
@@ -335,10 +344,195 @@ html, body {
   border: 1px solid var(--border);
 }
 
+.fold-summary {
+  min-height: 44px;
+  padding-block: 12px;
+}
+
 /* Mobile */
 @media (max-width: 640px) {
   .pixel-button {
-    font-size: 8px;
     padding: 10px 14px;
+  }
+}
+
+/* ===================== EKRAN ĆWICZENIA ===================== */
+/* ≥ 1400 px: panel zadania po lewej + scena z szefem po prawej.
+   < 1400 px: jedna kolumna — scena, pod nią zadanie; pole promptu przyklejone do dołu okna. */
+
+.battle-root {
+  --panel-w: clamp(20.5rem, 38%, 31.25rem);
+  --player-left: 43%;
+  --boss-left: 72%;
+  --bubble-w: clamp(16rem, 34%, 27.5rem);
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.battle-root.is-zone {
+  --panel-w: clamp(22.5rem, 44%, 38.75rem);
+  --player-left: 51%;
+  --boss-left: 76%;
+  --bubble-w: clamp(15rem, 30%, 26.25rem);
+}
+
+.battle-bg,
+.battle-shade {
+  position: fixed;
+  inset: 0;
+}
+
+.battle-topbar {
+  position: relative;
+  z-index: 50;
+  flex-shrink: 0;
+}
+
+.battle-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.battle-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--panel-w);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.battle-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 0 14px;
+  background: linear-gradient(rgba(6, 4, 20, 0), rgba(6, 4, 20, 0.96) 12px);
+}
+
+.battle-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 10px 0 14px;
+}
+
+.battle-actions > * { flex: 1 1 12rem; }
+.battle-actions > .battle-actions-map { flex: 0 0 auto; }
+
+.battle-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.battle-fighter {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 10;
+}
+
+.battle-fighter--player { bottom: 20%; left: var(--player-left); }
+.battle-fighter--boss   { bottom: 14%; left: var(--boss-left); }
+
+.battle-bubble {
+  position: absolute;
+  bottom: calc(14% + 230px);
+  right: 4%;
+  max-width: var(--bubble-w);
+  max-height: calc(86% - 230px - 1rem);
+  display: flex;
+  flex-direction: column;
+  z-index: 25;
+}
+
+.battle-bubble-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 1399.98px) {
+  .battle-root {
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .battle-stage {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .battle-scene {
+    position: relative;
+    inset: auto;
+    order: -1;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 0.75rem 1.5rem;
+    padding: 1rem clamp(1rem, 3vw, 2rem) 0.75rem;
+  }
+
+  .battle-fighter {
+    position: static;
+  }
+
+  .battle-fighter > .pixel-art { zoom: 0.5; }
+  .battle-fighter--player { order: 1; }
+  .battle-bubble          { order: 2; }
+  .battle-fighter--boss   { order: 3; }
+
+  .battle-bubble {
+    position: relative;
+    bottom: auto;
+    right: auto;
+    flex: 1 1 18rem;
+    max-width: 40rem;
+    max-height: none;
+    align-self: center;
+  }
+
+  .battle-bubble-body { overflow: visible; }
+
+  .battle-bubble-tail { display: none; }
+
+  /* nad panelem jest pasek i scena (~26rem) — przycisk musi zmieścić się w oknie bez przewijania */
+  .battle-composer .prompt-input {
+    max-height: max(calc(6lh + 40px), calc(100dvh - 26rem));
+  }
+
+  .battle-panel {
+    position: relative;
+    top: auto;
+    bottom: auto;
+    width: 100%;
+    max-width: 60rem;
+    margin-inline: auto;
+    min-height: 0;
+    overflow: visible;
+    padding-inline: clamp(1rem, 3vw, 1.5rem);
   }
 }

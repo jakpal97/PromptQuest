@@ -1,4 +1,5 @@
 import { getServiceClient } from '@/lib/supabase';
+import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
 
 function levelXpFor({ score, zone, bonus, xpReward, bonusXp }) {
   if (zone) {
@@ -10,13 +11,17 @@ function levelXpFor({ score, zone, bonus, xpReward, bonusXp }) {
 export async function POST(req) {
   try {
     const {
-      playerId, levelId, score, zone, bonus,
+      levelId, score, zone, bonus,
       co_poszlo_dobrze, co_poprawic, wskazowka, promptUsed,
     } = await req.json();
 
-    if (!playerId || !levelId) {
+    if (!levelId) {
       return Response.json({ error: 'Brak danych' }, { status: 400 });
     }
+
+    const playerId = await sessionPlayerId();
+    const denied = await guardLevelAccess(playerId, levelId);
+    if (denied) return denied;
 
     const supabase = getServiceClient();
 

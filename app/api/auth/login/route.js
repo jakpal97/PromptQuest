@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { getServiceClient } from '@/lib/supabase';
+import { setSessionCookie } from '@/lib/session';
 
 export async function POST(req) {
   try {
@@ -26,6 +27,7 @@ export async function POST(req) {
     }
 
     const { password_hash, ...safePlayer } = player;
+    await setSessionCookie(player.id);
     return Response.json({ player: safePlayer });
   } catch (err) {
     console.error('Login error:', err);

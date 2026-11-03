@@ -160,7 +160,7 @@ export default function MapPage() {
         minHeight: '100vh', background: 'var(--bg)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <span style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--accent)' }}>
+        <span style={{ fontFamily: "'Press Start 2P'", fontSize: 12, color: 'var(--accent)' }}>
           WCZYTYWANIE MAPY...
         </span>
       </div>
@@ -184,24 +184,24 @@ export default function MapPage() {
         gap: 12,
         flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           <Character characterId={player?.character_id} size={3} animate />
-          <div>
-            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, color: 'var(--gold)' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 12, lineHeight: 1.5, color: 'var(--gold)' }}>
               {player?.display_name || player?.username}
             </div>
-            <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>
+            <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>
               {playerLevel.emoji} {playerLevel.name} • {player?.total_xp || 0} XP
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
           {/* Życia */}
           {modules.find(m => m.day_number === player?.current_module)?.lives_enabled !== false && (
           <div style={{
             background: 'var(--bg2)', border: '1px solid var(--border)',
-            padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4,
+            minHeight: 44, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 4,
           }}>
             {Array.from({ length: 3 }, (_, i) => (
               <span key={i} style={{ fontSize: 16, opacity: i < (player?.current_lives || 3) ? 1 : 0.2 }}>❤️</span>
@@ -212,7 +212,7 @@ export default function MapPage() {
           <button
             onClick={() => setShowHowTo(true)}
             className="pixel-button"
-            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+            style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--accent)' }}
           >
             ❓ JAK GRAĆ
           </button>
@@ -220,7 +220,7 @@ export default function MapPage() {
           <button
             onClick={() => router.push('/library')}
             className="pixel-button"
-            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--green)' }}
+            style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--green)' }}
           >
             📚 BIBLIOTEKA
           </button>
@@ -228,7 +228,7 @@ export default function MapPage() {
           <button
             onClick={() => router.push('/leaderboard')}
             className="pixel-button"
-            style={{ fontSize: 9, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--gold)' }}
+            style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--gold)' }}
           >
             🏆 RANKING
           </button>
@@ -237,16 +237,16 @@ export default function MapPage() {
             <button
               onClick={() => router.push('/admin')}
               className="pixel-button"
-              style={{ fontSize: 8, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}
+              style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}
             >
               ⚙ ADMIN
             </button>
           )}
 
           <button
-            onClick={() => { sessionStorage.clear(); router.push('/login'); }}
+            onClick={() => { sessionStorage.clear(); fetch('/api/auth/logout', { method: 'POST' }); router.push('/login'); }}
             className="pixel-button"
-            style={{ fontSize: 8, padding: '6px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
+            style={{ fontSize: 11, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}
           >
             WYJDŹ
           </button>
@@ -258,7 +258,8 @@ export default function MapPage() {
 
         <div style={{
           fontFamily: "'Press Start 2P'",
-          fontSize: 'clamp(8px, 2vw, 11px)',
+          fontSize: 'clamp(11px, 1vw, 13px)',
+          lineHeight: 1.5,
           color: 'var(--white)',
           textAlign: 'center',
         }}>
@@ -270,9 +271,8 @@ export default function MapPage() {
           position: 'relative',
           width: '100%',
           flex: 1,
-          minHeight: 340,
+          minHeight: '20rem',
           border: '2px solid var(--border)',
-          overflow: 'hidden',
         }}>
           {/* Obrazek mapy — wypełnia kontener */}
           <img
@@ -284,6 +284,7 @@ export default function MapPage() {
               inset: 0,
               width: '100%',
               height: '100%',
+              maxWidth: 'none',
               objectFit: 'cover',
               objectPosition: 'center',
               display: 'block',
@@ -328,9 +329,12 @@ export default function MapPage() {
                   top: '110%',
                   left: '50%',
                   transform: 'translateX(-50%)',
-                  whiteSpace: 'nowrap',
+                  width: 'max-content',
+                  maxWidth: '12rem',
+                  textAlign: 'center',
+                  lineHeight: 1.5,
                   fontFamily: "'Press Start 2P'",
-                  fontSize: 9,
+                  fontSize: 11,
                   color: state === 'active' ? 'var(--accent)' : state === 'completed' ? 'var(--green)' : state === 'unlocked' ? 'var(--gold)' : 'var(--muted)',
                   textShadow: '1px 1px 3px rgba(0,0,0,0.9)',
                   background: 'rgba(10,10,26,0.85)',
@@ -350,19 +354,20 @@ export default function MapPage() {
                     background: 'var(--panel)',
                     border: `1px solid ${state === 'active' ? 'var(--accent)' : state === 'completed' ? 'var(--green)' : 'var(--border)'}`,
                     padding: '8px 14px',
-                    whiteSpace: 'nowrap',
+                    width: 'max-content',
+                    maxWidth: '16rem',
                     zIndex: 100,
                     boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
                     pointerEvents: 'none',
                   }}>
-                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--white)', marginBottom: 4 }}>
+                    <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--white)', marginBottom: 4 }}>
                       {node.label}
                     </div>
-                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 13, color: 'var(--muted)' }}>
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)' }}>
                       {node.sublabel}
                     </div>
                     <div style={{
-                      fontFamily: "'Rajdhani'", fontSize: 12, marginTop: 4,
+                      fontFamily: "'Rajdhani'", fontSize: 16, marginTop: 4,
                       color: state === 'locked' ? 'var(--red)' : state === 'completed' ? 'var(--green)' : 'var(--accent)',
                     }}>
                       {state === 'locked' ? '🔒 ZABLOKOWANE' : state === 'completed' ? '✓ UKOŃCZONE' : state === 'unlocked' ? '⭐ ODBLOKOWANE — WEJDŹ' : '▶ KLIKNIJ ABY WEJŚĆ'}
@@ -400,7 +405,7 @@ export default function MapPage() {
         {/* Legenda modułów — pasek pod mapą */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(15rem, 100%), 1fr))',
           gap: 6,
           width: '100%',
         }}>
@@ -419,24 +424,24 @@ export default function MapPage() {
                   transition: 'all 0.15s',
                 }}
               >
-                <div style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: 'var(--muted)', marginBottom: 4 }}>
+                <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', marginBottom: 4 }}>
                   MODUŁ {mod.day_number} · {mod.boss_name}
                 </div>
                 <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', fontWeight: 700, lineHeight: 1.2 }}>
                   {mod.title}
                 </div>
                 {state === 'active' && (
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--accent)', marginTop: 6 }}>
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--accent)', marginTop: 6 }}>
                     ▶ ZADANIE {player?.current_level_in_module || 1}/{mod.total_levels}
                   </div>
                 )}
                 {state === 'locked' && (
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--muted)', marginTop: 6 }}>
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--muted)', marginTop: 6 }}>
                     🔒 ZABLOKOWANY
                   </div>
                 )}
                 {state === 'completed' && (
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: 'var(--green)', marginTop: 6 }}>
+                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.5, color: 'var(--green)', marginTop: 6 }}>
                     ✓ UKOŃCZONO
                   </div>
                 )}
@@ -462,32 +467,32 @@ function HowToPlay({ onClose }) {
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(5,5,18,0.9)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        display: 'flex', overflowY: 'auto', padding: 20,
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: 'var(--panel)', border: '2px solid var(--accent)', maxWidth: 640, width: '100%',
-          padding: '24px 26px', boxShadow: '0 0 40px rgba(79,142,247,0.3)', animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
+          margin: 'auto', background: 'var(--panel)', border: '2px solid var(--accent)', maxWidth: '46rem', width: '100%',
+          padding: 'clamp(16px, 3vh, 24px) clamp(16px, 2vw, 26px)', boxShadow: '0 0 40px rgba(79,142,247,0.3)', animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
         }}
       >
-        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 14, color: 'var(--gold)', textAlign: 'center', marginBottom: 20 }}>
+        <div style={{ fontFamily: "'Press Start 2P'", fontSize: 14, color: 'var(--gold)', textAlign: 'center', marginBottom: 'clamp(12px, 2.5vh, 20px)' }}>
           ⚔ JAK GRAĆ
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(17rem, 100%), 1fr))', gap: 12 }}>
           {HOW_TO_STEPS.map((s, i) => (
             <div key={s.title} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', padding: '12px 14px' }}>
-              <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, color: 'var(--accent)', marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Press Start 2P'", fontSize: 11, lineHeight: 1.6, color: 'var(--accent)', marginBottom: 8 }}>
                 {i + 1}. {s.icon} {s.title}
               </div>
-              <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: 'var(--white)', fontWeight: 600, lineHeight: 1.45 }}>
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', fontWeight: 600, lineHeight: 1.45 }}>
                 {s.text}
               </div>
             </div>
           ))}
         </div>
-        <div style={{ fontFamily: "'Rajdhani'", fontSize: 15, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5, marginTop: 16, textAlign: 'center' }}>
+        <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5, marginTop: 16, textAlign: 'center' }}>
           🛡 Dziś nie tracisz żyć — liczą się punkty. Poprawianie prompta to nie porażka, tak właśnie pracuje się z AI!
           <br /><span style={{ color: '#ff9999' }}>🚫 Nie wklejaj nazwisk, kontaktów, PESEL-i, kwot z umów ani nazw klientów — pisz [KLIENT], [KWOTA], Firma X.</span>
         </div>

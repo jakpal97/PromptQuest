@@ -64,7 +64,7 @@ export default function LoginPage() {
       }} />
 
       {/* Logo */}
-      <div style={{ textAlign: 'center', marginBottom: 40 }}>
+      <div style={{ textAlign: 'center', marginBottom: 'clamp(16px, 5vh, 40px)' }}>
         <div style={{
           fontFamily: "'Press Start 2P', monospace",
           fontSize: 'clamp(14px, 4vw, 26px)',
@@ -89,7 +89,7 @@ export default function LoginPage() {
         </div>
         <div style={{
           fontFamily: "'Rajdhani', sans-serif",
-          fontSize: 14,
+          fontSize: 16,
           color: 'var(--muted)',
           letterSpacing: '3px',
           textTransform: 'uppercase',
@@ -102,7 +102,7 @@ export default function LoginPage() {
       <div style={{
         display: 'flex',
         gap: 24,
-        marginBottom: 36,
+        marginBottom: 'clamp(12px, 4vh, 36px)',
         opacity: 0.7,
       }}>
         {[1, 2, 3].map(id => (
@@ -125,14 +125,15 @@ export default function LoginPage() {
       {/* Panel logowania */}
       <div style={{
         width: '100%',
-        maxWidth: 380,
+        maxWidth: '26rem',
         background: 'var(--panel)',
         border: '2px solid var(--border)',
-        padding: 32,
+        padding: 'clamp(20px, 4vh, 32px)',
       }}>
         <div style={{
           fontFamily: "'Press Start 2P', monospace",
-          fontSize: 10,
+          fontSize: 12,
+          lineHeight: 1.5,
           color: 'var(--white)',
           marginBottom: 24,
           textAlign: 'center',
@@ -145,7 +146,7 @@ export default function LoginPage() {
           <div>
             <label style={{
               fontFamily: "'Press Start 2P', monospace",
-              fontSize: 8,
+              fontSize: 11,
               color: 'var(--muted)',
               display: 'block',
               marginBottom: 8,
@@ -162,6 +163,7 @@ export default function LoginPage() {
                 background: 'var(--bg2)',
                 border: '2px solid var(--border)',
                 color: 'var(--white)',
+                minHeight: 48,
                 padding: '10px 12px',
                 fontFamily: "'Rajdhani', sans-serif",
                 fontSize: 16,
@@ -175,7 +177,7 @@ export default function LoginPage() {
           <div>
             <label style={{
               fontFamily: "'Press Start 2P', monospace",
-              fontSize: 8,
+              fontSize: 11,
               color: 'var(--muted)',
               display: 'block',
               marginBottom: 8,
@@ -192,6 +194,7 @@ export default function LoginPage() {
                 background: 'var(--bg2)',
                 border: '2px solid var(--border)',
                 color: 'var(--white)',
+                minHeight: 48,
                 padding: '10px 12px',
                 fontFamily: "'Rajdhani', sans-serif",
                 fontSize: 16,
@@ -209,7 +212,7 @@ export default function LoginPage() {
               color: 'var(--red)',
               padding: '10px 12px',
               fontFamily: "'Rajdhani', sans-serif",
-              fontSize: 14,
+              fontSize: 16,
             }}>
               ❌ {error}
             </div>
@@ -227,9 +230,9 @@ export default function LoginPage() {
       </div>
 
       <div style={{
-        marginTop: 24,
+        marginTop: 'clamp(12px, 3vh, 24px)',
         fontFamily: "'Press Start 2P', monospace",
-        fontSize: 7,
+        fontSize: 11,
         color: 'var(--muted)',
         textAlign: 'center',
         lineHeight: 2,
