@@ -21,7 +21,7 @@ export async function GET(req) {
     // Jeden wiersz na (gracz, level) — trzyma najlepszy wynik i licznik prób
     const { data: battles, error } = await supabase
       .from('battles')
-      .select('level_id, score, zone, attempt_number, prompt_used, co_poszlo_dobrze, co_poprawic, wskazowka')
+      .select('level_id, score, zone, attempt_number, prompt_used, co_poszlo_dobrze, co_poprawic, wskazowka, completed_via')
       .eq('player_id', playerId)
       .in('level_id', levelIds);
 
@@ -32,7 +32,9 @@ export async function GET(req) {
     const prompts = {};
     const zones = {};
     const feedback = {};
+    const completedVia = {};
     battles?.forEach(b => {
+      if (b.completed_via) completedVia[b.level_id] = b.completed_via;
       bestScores[b.level_id] = b.score;
       attempts[b.level_id] = b.attempt_number || 1;
       prompts[b.level_id] = b.prompt_used;
@@ -40,7 +42,7 @@ export async function GET(req) {
       feedback[b.level_id] = { co_poszlo_dobrze: b.co_poszlo_dobrze, co_poprawic: b.co_poprawic, wskazowka: b.wskazowka };
     });
 
-    return Response.json({ bestScores, attempts, prompts, zones, feedback });
+    return Response.json({ bestScores, attempts, prompts, zones, feedback, completedVia });
   } catch (err) {
     return Response.json({ error: 'Błąd serwera' }, { status: 500 });
   }

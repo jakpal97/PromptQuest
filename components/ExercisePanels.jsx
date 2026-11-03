@@ -13,7 +13,7 @@ export const ZONES = {
 
 export function zoneBossLine(zone) {
   if (zone === 'green') return 'Świetnie! Tak to się robi — strefa zielona. Zapisz ten prompt w bibliotece!';
-  if (zone === 'yellow') return 'Blisko! Jeszcze jedna poprawka i będzie zielono.';
+  if (zone === 'yellow') return 'Blisko! Popraw jedną rzecz i będzie zielono.';
   return 'Stop — w takiej wersji to nie przejdzie. Zobacz, co poprawić, i spróbuj jeszcze raz.';
 }
 
@@ -191,9 +191,16 @@ export function ZoneResult({ result, level, saved }) {
             {result.bonus ? `⭐ BONUS +${bonusXp} XP` : '☆ Bonus nie tym razem'}{result.bonus_powod ? ` — ${result.bonus_powod}` : ''}
           </div>
         )}
+        {result.zone === 'yellow' && result.co_poprawic && (
+          <div style={{ marginTop: 10, ...body, fontSize: 17, color: '#f3e3b0' }}>
+            Blisko! Popraw jedną rzecz: {result.co_poprawic}
+          </div>
+        )}
         {result.zone !== 'green' && (
           <div style={{ marginTop: 10, ...body, color: '#cfd3ff' }}>
-            Ćwiczenie trwa, dopóki nie zdobędziesz zielonej. Przeczytaj wskazówki i wyślij nowy, kompletny prompt — każda próba jest oceniana od zera. Dziś nie tracisz życia.
+            {result.zone === 'yellow'
+              ? 'Żółta jeszcze nie zalicza ćwiczenia. Dopisz brakującą rzecz i wyślij prompt jeszcze raz — dziś nie tracisz życia.'
+              : 'Ćwiczenie trwa, dopóki nie zdobędziesz zielonej. Przeczytaj wskazówki i wyślij nowy, kompletny prompt — każda próba jest oceniana od zera. Dziś nie tracisz życia.'}
           </div>
         )}
       </div>
@@ -234,13 +241,66 @@ export function RevealAfterPass({ reveal }) {
   );
 }
 
-export function ReferencePrompt({ reference, unlocked, reason }) {
-  const [open, setOpen] = useState(false);
+// Podpowiedź po 3 nieudanych próbach: jedno przykładowe zdanie do dopisania, nie cały prompt
+export function StrongHint({ hint, onAppend }) {
+  if (!hint?.example) return null;
+  return (
+    <Card color="var(--gold)" background="rgba(247,201,79,0.08)">
+      <Label color="var(--gold)">🧭 DODATKOWA POMOC</Label>
+      {hint.missing && <div style={{ ...body, color: '#f3e3b0', marginBottom: 8 }}>{hint.missing}</div>}
+      <div style={{ ...body, color: 'var(--muted)', marginBottom: 4 }}>Możesz dopisać do swojego prompta na przykład takie zdanie:</div>
+      <div style={{ ...body, fontWeight: 500, background: 'rgba(10,10,26,0.9)', borderLeft: '3px solid var(--gold)', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
+        {hint.example}
+      </div>
+      {onAppend && (
+        <button onClick={() => onAppend(hint.example)} className="chip-button" style={{ marginTop: 8, borderColor: 'var(--gold)', color: 'var(--gold)' }}>
+          ✏️ Dopisz to zdanie do mojego prompta
+        </button>
+      )}
+    </Card>
+  );
+}
+
+// Po 5 nieudanych próbach: wzorzec + zaliczenie za 50% XP, bez bonusu
+export function SkipOffer({ attempts, xpReward, state, onSkip, next }) {
+  const half = Math.round(xpReward * 0.5);
+  if (state?.done) {
+    return (
+      <Card color="var(--green)" background="rgba(79,247,160,0.08)">
+        <Label color="var(--green)">✅ ĆWICZENIE ZALICZONE ZE WZORCEM</Label>
+        <div style={body}>
+          {state.xpGained > 0 ? `+${state.xpGained} XP` : '+0 XP'} (połowa nagrody, bez bonusu). Przeczytaj spokojnie wzorcowy prompt i porównaj go ze swoim — potem przejdź dalej.
+        </div>
+        {next && (
+          <button onClick={next.onClick} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 10px', width: '100%', marginTop: 10 }}>
+            {next.label}
+          </button>
+        )}
+      </Card>
+    );
+  }
+  return (
+    <Card color="rgba(79,142,247,0.6)" background="rgba(79,142,247,0.08)">
+      <Label color="var(--accent)">🤝 GOTOWY WZORZEC</Label>
+      <div style={{ ...body, marginBottom: 10 }}>
+        To już {attempts}. próba — świetnie, że się nie poddajesz! Możesz zobaczyć wzorcowy prompt i przejść do kolejnego ćwiczenia.
+        Ćwiczenie zostanie zaliczone za {half} XP (połowa nagrody, bez bonusu).
+      </div>
+      <button onClick={onSkip} disabled={state?.saving} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 10px', width: '100%' }}>
+        {state?.saving ? 'ZAPISUJĘ…' : '📘 Pokaż wzorzec i przejdź dalej'}
+      </button>
+      {state?.error && <div style={{ ...body, color: 'var(--red)', marginTop: 8 }}>{state.error}</div>}
+    </Card>
+  );
+}
+
+export function ReferencePrompt({ reference, unlocked, reason, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   if (!reference) return null;
   if (!unlocked) {
     return (
       <div style={{ ...body, color: 'var(--muted)', border: '1px dashed var(--border)', borderRadius: 4, padding: '8px 12px' }}>
-        🔒 Wzorcowy prompt zobaczysz po zaliczeniu ćwiczenia (strefa zielona).
+        🔒 Wzorcowy prompt zobaczysz po zaliczeniu ćwiczenia (strefa zielona) albo po 5 próbach.
       </div>
     );
   }

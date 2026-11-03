@@ -6,7 +6,10 @@ import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
 import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, StrongHint, SkipOffer, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+
+const STRONG_HINT_AFTER = 3;
+const SKIP_AFTER = 5;
 
 const PIXEL = "'Press Start 2P'";
 
@@ -92,10 +95,27 @@ export default function BattlePage() {
   const [savedFeedback, setSavedFeedback] = useState({});
   const [savedZones, setSavedZones] = useState({});
   const [showLevelList, setShowLevelList] = useState(false);
+  const [completedVia, setCompletedVia] = useState({});
+  const [hint, setHint] = useState(null);
+  const [skipState, setSkipState] = useState(null);
 
   const textareaRef = useRef(null);
+  const panelRef = useRef(null);
 
   useEffect(() => { loadData(); }, [levelId]);
+
+  // Wynik zastępuje formularz w tym samym panelu — bez tego zostaje przewinięty na dół
+  useEffect(() => {
+    if (!result) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    panel.scrollTop = 0;
+    const root = panel.closest('.battle-root');
+    if (root && getComputedStyle(root).overflowY === 'auto') {
+      const offset = panel.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      if (offset < 0) root.scrollTop += offset;
+    }
+  }, [result]);
 
   useEffect(() => {
     if (!evaluating) return;
@@ -129,6 +149,8 @@ export default function BattlePage() {
     setShowFullResponse(false);
     setLibraryState(null);
     setShowLevelList(false);
+    setSkipState(null);
+    setHint(JSON.parse(sessionStorage.getItem(`hint:${levelId}`) || 'null'));
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -153,9 +175,9 @@ export default function BattlePage() {
     const isAdmin = (freshPlayer?.role || sessionStorage.getItem('role')) === 'admin';
     const mod = levelData.modules;
     if (!isAdmin && mod?.day_number > 1 && !mod.unlocked) { router.replace('/map'); return; }
-    const lock = lockReasonOf(levelData, allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin);
+    const lock = lockReasonOf(levelData, allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin, scoresData.completedVia || {});
     if (lock) {
-      const target = nextPlayableLevel(allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin);
+      const target = nextPlayableLevel(allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin, scoresData.completedVia || {});
       if (!target || target.id === levelData.id) { router.replace('/map'); return; }
       sessionStorage.setItem('lockNotice', JSON.stringify({ levelId: target.id, text: lockMessageOf(lock, levelData, allLevels) }));
       router.replace(`/battle/${target.id}`);
@@ -173,6 +195,7 @@ export default function BattlePage() {
     setModulePrompts(scoresData.prompts || {});
     setSavedFeedback(scoresData.feedback || {});
     setSavedZones(scoresData.zones || {});
+    setCompletedVia(scoresData.completedVia || {});
 
     if (freshPlayer) {
       const playerData = freshPlayer;
@@ -218,6 +241,11 @@ export default function BattlePage() {
       const data = await res.json();
       if (res.status === 401) { expireSession(); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
+      if (data.przyklad_zdania) {
+        const next = { example: data.przyklad_zdania, missing: data.co_poprawic };
+        setHint(next);
+        sessionStorage.setItem(`hint:${levelId}`, JSON.stringify(next));
+      }
       setResult(data);
       await animateAndSave(data);
     } catch (err) {
@@ -307,6 +335,10 @@ export default function BattlePage() {
     if (savedData.newLives !== undefined && savedData.newLives < lives) {
       setTimeout(() => { setLives(savedData.newLives); setPlayerHp(Math.round((savedData.newLives / 3) * 100)); }, 900);
     }
+    showProgress(savedData);
+  }
+
+  function showProgress(savedData) {
     if (savedData.moduleComplete) {
       const oldLvl = getPlayerLevel(player?.total_xp || 0);
       const newLvl = getPlayerLevel(savedData.newTotalXp);
@@ -320,6 +352,26 @@ export default function BattlePage() {
     if (savedData.newTotalXp !== undefined) {
       setPlayer(p => ({ ...p, total_xp: savedData.newTotalXp, current_lives: savedData.newLives }));
       sessionStorage.setItem('totalXp', savedData.newTotalXp);
+    }
+  }
+
+  async function skipWithReference() {
+    const id = parseInt(levelId);
+    setSkipState({ saving: true });
+    try {
+      const res = await fetch('/api/battle/skip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ levelId: id }),
+      });
+      const data = await res.json();
+      if (res.status === 401) { expireSession(); return; }
+      if (!res.ok) throw new Error(data.error || 'Nie udało się zapisać.');
+      setCompletedVia(prev => ({ ...prev, [id]: 'reference' }));
+      setSkipState({ done: true, xpGained: data.xpGained });
+      showProgress(data);
+    } catch (err) {
+      setSkipState({ error: err.message });
     }
   }
 
@@ -380,7 +432,7 @@ export default function BattlePage() {
   }
 
   function lockReason(lvl) {
-    return lockReasonOf(lvl, moduleLevels, bestScores, module?.active_block, player?.role === 'admin');
+    return lockReasonOf(lvl, moduleLevels, bestScores, module?.active_block, player?.role === 'admin', completedVia);
   }
 
   function isLevelLocked(lvl) {
@@ -418,8 +470,14 @@ export default function BattlePage() {
   const xpGained = saved?.xpGained;
   const redZoneHits = zoneMode && !result ? detectRedZone(prompt, cfg.red_terms) : [];
   const passMark = zoneMode ? 90 : 40;
-  const passedHere = (bestScores[id] ?? 0) >= passMark;
+  const passedHere = level ? isPassed(level, bestScores, completedVia) : false;
+  const failedAttempts = passedHere ? 0 : (attempts[id] ?? 0);
+  const showStrongHint = zoneMode && !passedHere && failedAttempts >= STRONG_HINT_AFTER && !!hint?.example;
+  const canSkip = zoneMode && !!cfg.reference && (skipState?.done || (!passedHere && failedAttempts >= SKIP_AFTER));
   const referenceUnlocked = zoneMode ? passedHere : (bestScores[id] ?? 0) >= 70 || (attempts[id] ?? 0) >= 2;
+  const skipNext = !result && skipState?.done && nextLevel && !nextLocked
+    ? { label: `DALEJ: ${nextLevel.label || nextLevel.code || 'następne'} ▶`, onClick: () => router.push(`/battle/${nextLevel.id}`) }
+    : null;
   const exerciseLabel = cfg?.label || (level?.code ? `ĆWICZENIE ${level.code}` : 'ZADANIE');
   const relatedLevel = cfg?.related_code ? moduleLevels.find(l => l.code === cfg.related_code) : null;
   const relatedPrompt = relatedLevel ? modulePrompts[relatedLevel.id] : null;
@@ -534,7 +592,7 @@ export default function BattlePage() {
               {moduleLevels.map(lvl => {
                 const isCurrent = lvl.id === parseInt(levelId);
                 const score = bestScores[lvl.id];
-                const isDone = score !== undefined && score >= passMark;
+                const isDone = isPassed(lvl, bestScores, completedVia);
                 const isPerfect = score !== undefined && score >= (zoneMode ? 90 : 70);
                 const lock = lockReason(lvl);
                 const locked = lock !== null;
@@ -571,7 +629,7 @@ export default function BattlePage() {
               className="chip-button"
               style={{ fontFamily: PIXEL, fontSize: 11, flexShrink: 0 }}
             >
-              📋 {moduleLevels.filter(l => (bestScores[l.id] ?? 0) >= passMark).length}/{moduleLevels.length} {showLevelList ? '▲' : '▼'}
+              📋 {moduleLevels.filter(l => isPassed(l, bestScores, completedVia)).length}/{moduleLevels.length} {showLevelList ? '▲' : '▼'}
             </button>
           </div>
         )}
@@ -580,6 +638,7 @@ export default function BattlePage() {
             levels={moduleLevels}
             currentId={id}
             bestScores={bestScores}
+            completedVia={completedVia}
             lockReason={lockReason}
             onOpen={(lvl) => { setShowLevelList(false); if (lvl.id !== id) router.push(`/battle/${lvl.id}`); }}
           />
@@ -588,7 +647,7 @@ export default function BattlePage() {
 
       <div className="battle-stage">
       {/* ===== LEWY PANEL ===== */}
-      <div className="battle-panel" style={{
+      <div ref={panelRef} className="battle-panel" style={{
         background: 'rgba(6,4,20,0.82)', backdropFilter: 'blur(8px)',
         borderRight: '1px solid rgba(79,142,247,0.15)',
       }}>
@@ -628,6 +687,7 @@ export default function BattlePage() {
             score={bestScores[id]}
             prompt={level.type === 'blind_test' ? null : modulePrompts[id]}
             feedback={savedFeedback[id]}
+            via={completedVia[id]}
           />
         )}
 
@@ -637,7 +697,13 @@ export default function BattlePage() {
             {zoneMode ? (
               <>
                 <ExerciseBrief level={level} relatedPrompt={relatedPrompt} onInsert={(t) => { setPrompt(t); setTimeout(() => textareaRef.current?.focus(), 0); }} />
-                <ReferencePrompt reference={cfg.reference} unlocked={referenceUnlocked} reason="Porównaj ze swoim." />
+                <ReferencePrompt
+                  key={skipState?.done ? 'ref-open' : 'ref'}
+                  reference={cfg.reference}
+                  unlocked={referenceUnlocked}
+                  defaultOpen={!!skipState?.done}
+                  reason="Porównaj ze swoim."
+                />
                 <RedZoneBanner />
               </>
             ) : (
@@ -690,6 +756,8 @@ export default function BattlePage() {
                       : <>Poprzednia próba: <span style={{ color: scoreColorOf(lastAttempt.score) }}>{lastAttempt.score}/100</span> — popraw prompt i pobij ten wynik!</>}
                   </div>
                 )}
+                {showStrongHint && <StrongHint hint={hint} onAppend={insertBlock} />}
+                {canSkip && <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={skipNext} />}
               </>
             )}
 
@@ -784,8 +852,17 @@ export default function BattlePage() {
             {result.kryteria && <CriteriaBars kryteria={result.kryteria} />}
 
             <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={result.co_poszlo_dobrze} color="var(--green)" />
-            <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={result.co_poprawic} color="var(--red)" />
+            {!(zoneMode && result.zone === 'yellow' && result.co_poprawic) && (
+              <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={result.co_poprawic} color="var(--red)" />
+            )}
             <FeedbackBox icon="💡" label="WSKAZÓWKA" text={result.wskazowka} color="var(--gold)" />
+
+            {showStrongHint && result.zone !== 'green' && !result.error && (
+              <StrongHint hint={hint} onAppend={(t) => retry(`${prompt.trimEnd()}\n${t}`)} />
+            )}
+            {canSkip && !result.error && (
+              <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} />
+            )}
 
             {result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
               <div style={{ background: 'rgba(79,247,160,0.06)', border: '1px dashed var(--green)', borderRadius: 4, padding: '10px 12px' }}>
@@ -824,7 +901,13 @@ export default function BattlePage() {
             {zoneMode && referenceUnlocked && cfg.reveal && <RevealAfterPass reveal={cfg.reveal} />}
 
             {zoneMode && (
-              <ReferencePrompt reference={cfg.reference} unlocked={referenceUnlocked} reason="Porównaj ze swoim." />
+              <ReferencePrompt
+                key={skipState?.done ? 'ref-open' : 'ref'}
+                reference={cfg.reference}
+                unlocked={referenceUnlocked}
+                defaultOpen={!!skipState?.done}
+                reason="Porównaj ze swoim."
+              />
             )}
 
             {zoneMode && cfg.footer && result.zone === 'green' && (
@@ -864,12 +947,12 @@ export default function BattlePage() {
                   {level?.type === 'blind_test' ? '🔄 JESZCZE RAZ' : zoneMode && result.zone === 'green' ? '⭐ POWALCZ O BONUS' : zoneMode ? '✏️ NOWA PRÓBA' : '✏️ POPRAW PROMPT'}
                 </button>
               )}
-              {nextLevel && !nextLocked && (zoneMode ? result.zone === 'green' : result.score >= 40) && !result.error && (
+              {nextLevel && !nextLocked && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
                 <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 8px' }}>
                   {nextLevel.code ? `DALEJ: ${nextLevel.label || nextLevel.code} ▶` : 'NASTĘPNE ▶'}
                 </button>
               )}
-              {nextLevel && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' : result.score >= 40) && !result.error && (
+              {nextLevel && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
                 <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
                   🔒 {nextLevel.label || nextLevel.code || 'Następne'} odblokuje trener
                 </div>
@@ -1065,12 +1148,12 @@ function BlindTestInput({ options, blindAnswer, setBlindAnswer, disabled }) {
   );
 }
 
-function LevelList({ levels, currentId, bestScores, lockReason, onOpen }) {
+function LevelList({ levels, currentId, bestScores, completedVia, lockReason, onOpen }) {
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: '6px 14px 10px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'grid', gap: 4, maxHeight: '50vh', overflowY: 'auto' }}>
       {levels.map(lvl => {
         const lock = lockReason(lvl);
-        const done = isPassed(lvl, bestScores);
+        const done = isPassed(lvl, bestScores, completedVia);
         const current = lvl.id === currentId;
         const color = lock ? 'var(--muted)' : current ? 'var(--accent)' : done ? 'var(--green)' : 'var(--white)';
         return (
@@ -1102,12 +1185,15 @@ function LevelList({ levels, currentId, bestScores, lockReason, onOpen }) {
   );
 }
 
-function PassedAttempt({ zone, score, prompt, feedback }) {
+function PassedAttempt({ zone, score, prompt, feedback, via }) {
   const z = ZONES[zone];
+  const title = via === 'reference' ? '📘 ZALICZONE ZE WZORCEM — TWOJE NAJLEPSZE PODEJŚCIE'
+    : via === 'trainer' ? '🎓 ZALICZONE PRZEZ TRENERA — TWOJE NAJLEPSZE PODEJŚCIE'
+    : '✅ ZALICZONE — TWOJE NAJLEPSZE PODEJŚCIE';
   return (
     <details style={{ background: 'rgba(79,247,160,0.06)', border: '1px solid var(--green)', borderRadius: 4, padding: '0 12px' }}>
       <summary className="fold-summary" style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.6, color: 'var(--green)', cursor: 'pointer' }}>
-        ✅ ZALICZONE — TWOJE NAJLEPSZE PODEJŚCIE {z ? `· ${z.label}` : `· ${score}/100`}
+        {title} {z ? `· ${z.label}` : score ? `· ${score}/100` : ''}
       </summary>
       <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
         {prompt && (

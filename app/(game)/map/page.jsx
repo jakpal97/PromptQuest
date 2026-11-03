@@ -98,9 +98,9 @@ export default function MapPage() {
     ]);
     const { levels } = levelsRes.ok ? await levelsRes.json() : { levels: [] };
     if (!levels || levels.length === 0) return;
-    const { bestScores } = scoresRes.ok ? await scoresRes.json() : { bestScores: {} };
+    const { bestScores, completedVia } = scoresRes.ok ? await scoresRes.json() : { bestScores: {} };
 
-    const target = nextPlayableLevel(levels, bestScores || {}, mod?.active_block, player?.role === 'admin');
+    const target = nextPlayableLevel(levels, bestScores || {}, mod?.active_block, player?.role === 'admin', completedVia || {});
     if (target) router.push(`/battle/${target.id}`);
   }
 

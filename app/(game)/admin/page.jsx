@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getPlayerLevel } from '@/lib/auth';
 import Character from '@/components/Character';
@@ -17,6 +17,9 @@ export default function AdminPage() {
   const [sessionName, setSessionName] = useState('');
   const [resetting, setResetting] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
+  const [openPlayerId, setOpenPlayerId] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [marking, setMarking] = useState(null);
 
   useEffect(() => {
     const role = sessionStorage.getItem('role');
@@ -37,6 +40,34 @@ export default function AdminPage() {
       const { players: data } = await res.json();
       setPlayers(data || []);
     }
+  }
+
+  async function loadProgress(targetId) {
+    const res = await fetch(`/api/admin/progress?playerId=${targetId}&day=1`);
+    const data = await res.json();
+    setProgress(res.ok ? { exercises: data.exercises } : { error: data.error || 'Nie udało się pobrać postępu.' });
+  }
+
+  async function toggleProgress(targetId) {
+    if (openPlayerId === targetId) { setOpenPlayerId(null); return; }
+    setOpenPlayerId(targetId);
+    setProgress(null);
+    await loadProgress(targetId);
+  }
+
+  async function markPassed(targetId, exercise) {
+    const name = exercise.label || exercise.code || `ćwiczenie ${exercise.id}`;
+    if (!confirm(`Oznaczyć „${name}” jako zaliczone? Uczestnik dostanie pełne XP za ćwiczenie (bez bonusu) i odblokuje następne.`)) return;
+    setMarking(exercise.id);
+    const res = await fetch('/api/admin/mark-passed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetPlayerId: targetId, levelId: exercise.id }),
+    });
+    const data = await res.json();
+    setMarking(null);
+    if (!res.ok) { alert(data.error || 'Nie udało się oznaczyć.'); return; }
+    await Promise.all([loadProgress(targetId), loadPlayers()]);
   }
 
   async function loadModules() {
@@ -291,7 +322,7 @@ export default function AdminPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 16 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg2)' }}>
-                    {['Postać', 'Username', 'Imię', 'Poziom', 'XP', 'Moduł'].map(h => (
+                    {['Postać', 'Username', 'Imię', 'Poziom', 'XP', 'Moduł', 'Dzień 1'].map(h => (
                       <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                         {h}
                       </th>
@@ -301,8 +332,10 @@ export default function AdminPage() {
                 <tbody>
                   {players.filter(p => p.role === 'player').map(p => {
                     const lvl = getPlayerLevel(p.total_xp);
+                    const open = openPlayerId === p.id;
                     return (
-                      <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <Fragment key={p.id}>
+                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
                         <td style={{ padding: '8px 12px' }}>
                           {p.character_id ? (
                             <div className="pixel-art" style={{
@@ -329,7 +362,55 @@ export default function AdminPage() {
                             M{p.current_module} L{p.current_level_in_module}
                           </span>
                         </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <button
+                            onClick={() => toggleProgress(p.id)}
+                            aria-expanded={open}
+                            className="pixel-button"
+                            style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg2)', border: `1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, color: open ? 'var(--accent)' : 'var(--muted)' }}
+                          >
+                            📋 ĆWICZENIA {open ? '▲' : '▼'}
+                          </button>
+                        </td>
                       </tr>
+                      {open && (
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(15,12,36,0.6)' }}>
+                          <td colSpan={7} style={{ padding: '10px 12px' }}>
+                            {!progress ? (
+                              <span style={{ color: 'var(--muted)' }}>Ładowanie…</span>
+                            ) : progress.error ? (
+                              <span style={{ color: 'var(--red)' }}>{progress.error}</span>
+                            ) : (
+                              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+                                {progress.exercises.map(ex => (
+                                  <li key={ex.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                    <span style={{ width: 22, textAlign: 'center' }}>{ex.passed ? '✅' : '•'}</span>
+                                    <span style={{ flex: '1 1 16rem', fontWeight: 600 }}>
+                                      {ex.label || ex.code}{ex.title ? ` — ${ex.title}` : ''}
+                                    </span>
+                                    <span style={{ color: 'var(--muted)', minWidth: '14rem' }}>
+                                      {ex.passed
+                                        ? ex.completedVia === 'reference' ? 'zaliczone ze wzorcem' : ex.completedVia === 'trainer' ? 'zaliczone przez trenera' : 'zaliczone'
+                                        : ex.attempts ? `${ex.attempts} ${ex.attempts === 1 ? 'próba' : ex.attempts < 5 ? 'próby' : 'prób'}${ex.zone ? ` · ostatnio ${ex.zone === 'yellow' ? 'żółta' : ex.zone === 'red' ? 'czerwona' : 'zielona'}` : ''}` : 'jeszcze nie próbował(a)'}
+                                    </span>
+                                    {!ex.passed && (
+                                      <button
+                                        onClick={() => markPassed(p.id, ex)}
+                                        disabled={marking === ex.id}
+                                        className="pixel-button"
+                                        style={{ fontSize: 11, padding: '6px 10px', background: 'rgba(79,247,160,0.1)', border: '1px solid var(--green)', color: 'var(--green)' }}
+                                      >
+                                        {marking === ex.id ? 'ZAPISUJĘ…' : '✓ OZNACZ JAKO ZALICZONE'}
+                                      </button>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

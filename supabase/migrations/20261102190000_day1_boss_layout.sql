@@ -38,6 +38,18 @@ UPDATE levels SET config = jsonb_set(config, '{duration}', '"10 min"') WHERE mod
 UPDATE levels SET config = jsonb_set(config, '{evaluator}', to_jsonb('ZASADA NADRZĘDNA: jeśli prompt nie zawiera ŻADNEJ instrukcji przeciw zmyślaniu (brak zgody na „nie wiem”, brak zakazu wymyślania źródeł, brak oznaczania pewności) — np. samo „wymień 3 badania…” — strefa jest CZERWONA, bez wyjątków, nawet jeśli pytanie jest krótkie i jasne. ' || (config->>'evaluator')))
 WHERE module_id = 1 AND code = '1C';
 
+UPDATE levels SET config = config || jsonb_build_object(
+  'examples_title', 'Pomysły na pytanie (wybierz jedno albo weź temat ze swojej pracy):',
+  'examples', jsonb_build_array(
+    '3 polskie badania naukowe o pracy zdalnej w małych firmach, z autorami i rokiem.',
+    '5 książek o negocjacjach wydanych po polsku, z wydawnictwem i rokiem wydania.',
+    'Artykuły Kodeksu pracy, które regulują pracę zdalną, z numerami i treścią.',
+    'Statystyki rynku Twojej branży w Polsce za 2025 rok, ze źródłem każdej liczby.',
+    '3 przykłady polskich firm, które wdrożyły AI w obsłudze klienta, z wynikami w liczbach.',
+    'Znane cytaty o zarządzaniu zmianą, z autorem i źródłem (książka, wywiad, rok).'
+  )
+) WHERE module_id = 1 AND code = '1C';
+
 -- 2A: 20 min, praca samodzielna, bez zadania po szkoleniu
 UPDATE levels SET config = config
   || jsonb_build_object('duration', '20 min')

@@ -1,21 +1,15 @@
 import { getServiceClient } from '@/lib/supabase';
+import { requireAdmin } from '@/lib/session';
 
-export async function GET(req) {
+const PUBLIC_COLUMNS = 'id, username, display_name, character_id, role, total_xp, current_module, current_level_in_module, current_lives, created_at';
+
+export async function GET() {
   try {
-    const { searchParams } = new URL(req.url);
-    const requesterId = searchParams.get('requesterId');
+    const { denied } = await requireAdmin();
+    if (denied) return denied;
 
-    const supabase = getServiceClient();
-
-    // Sprawdź uprawnienia
-    if (requesterId) {
-      const { data: req_player } = await supabase.from('players').select('role').eq('id', requesterId).single();
-      if (!req_player || req_player.role !== 'admin') {
-        return Response.json({ error: 'Brak uprawnień' }, { status: 403 });
-      }
-    }
-
-    const { data: players } = await supabase.from('players').select('*').order('total_xp', { ascending: false });
+    const { data: players } = await getServiceClient()
+      .from('players').select(PUBLIC_COLUMNS).order('total_xp', { ascending: false });
     return Response.json({ players: players || [] });
   } catch (err) {
     return Response.json({ error: 'Błąd serwera' }, { status: 500 });
