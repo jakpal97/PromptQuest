@@ -1,15 +1,44 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
-import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName } from '@/lib/progress';
+import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName, bypassesLocks } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { AI_UNAVAILABLE, MAX_FOLLOW_UPS, chatEnabled, hasQuestions } from '@/lib/conversation';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
+}
+
+const EMPTY_CHAT = { history: [], reply: '' };
+
+// Pytania AI z kroku 1 zadania-rozmowy przeżywają odświeżenie strony
+const CONVERSATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+function conversationKey(levelId) {
+  return `pq_conv_${sessionStorage.getItem('playerId')}_${levelId}`;
+}
+
+function readConversation(levelId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(conversationKey(levelId)) || 'null');
+    return saved && Date.now() - saved.at < CONVERSATION_TTL_MS ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberConversation(levelId, prompt, result) {
+  try {
+    localStorage.setItem(conversationKey(levelId), JSON.stringify({ prompt, result, at: Date.now() }));
+  } catch {}
+}
+
+function forgetConversation(levelId) {
+  try { localStorage.removeItem(conversationKey(levelId)); } catch {}
 }
 
 const EXAMPLE_AFTER = 3;
@@ -102,24 +131,44 @@ export default function BattlePage() {
   const [completedVia, setCompletedVia] = useState({});
   const [skipState, setSkipState] = useState(null);
   const [copyNotice, setCopyNotice] = useState(null);
+  const [aiNotice, setAiNotice] = useState(null);
+  const [conv, setConv] = useState(null);
 
   const textareaRef = useRef(null);
-  const panelRef = useRef(null);
+  const sideScrollRef = useRef(null);
+  const resultRef = useRef(null);
+  const chatRef = useRef(null);
 
   useEffect(() => { loadData(); }, [levelId]);
 
-  // Wynik zastępuje formularz w tym samym panelu — bez tego zostaje przewinięty na dół
+  // Wynik stoi na górze prawej kolumny; w układzie jednokolumnowym (przewija się cała strona) trzeba do niego zjechać
   useEffect(() => {
     if (!result) return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    panel.scrollTop = 0;
-    const root = panel.closest('.battle-root');
-    if (root && getComputedStyle(root).overflowY === 'auto') {
-      const offset = panel.getBoundingClientRect().top - root.getBoundingClientRect().top;
-      if (offset < 0) root.scrollTop += offset;
-    }
+    if (sideScrollRef.current) sideScrollRef.current.scrollTop = 0;
+    const root = resultRef.current?.closest('.battle-root');
+    const singleColumn = root && getComputedStyle(root).overflowY === 'auto';
+    if (chatRef.current) chatRef.current.scrollIntoView({ block: 'end' });
+    else if (singleColumn) resultRef.current?.scrollIntoView({ block: 'start' });
   }, [result]);
+
+  useEffect(() => {
+    if (conv?.history?.length || conv?.done) chatRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, [conv?.history?.length, conv?.done]);
+
+  // Pole rośnie z tekstem; granice (ok. 5–12 linii) wyznacza CSS przez min-/max-height
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const fit = () => {
+      const top = el.scrollTop;
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+      el.scrollTop = top;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [prompt, result, loading]);
 
   useEffect(() => {
     if (!evaluating) return;
@@ -155,6 +204,8 @@ export default function BattlePage() {
     setShowLevelList(false);
     setSkipState(null);
     setCopyNotice(null);
+    setAiNotice(null);
+    setConv(null);
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -176,7 +227,7 @@ export default function BattlePage() {
     const scoresData = scoresRes.ok ? await scoresRes.json() : {};
     const freshPlayer = playerRes.ok ? (await playerRes.json()).player : null;
 
-    const isAdmin = (freshPlayer?.role || sessionStorage.getItem('role')) === 'admin';
+    const isAdmin = bypassesLocks(freshPlayer?.role || sessionStorage.getItem('role'));
     const mod = levelData.modules;
     if (!isAdmin && mod?.day_number > 1 && !mod.unlocked) { router.replace('/map'); return; }
     const lock = lockReasonOf(levelData, allLevels, scoresData.bestScores || {}, mod?.active_block, isAdmin, scoresData.completedVia || {});
@@ -220,6 +271,13 @@ export default function BattlePage() {
       setPlayerHp(Math.round((l / 3) * 100));
     }
 
+    const pendingConversation = levelData.config?.conversation ? readConversation(levelData.id) : null;
+    if (pendingConversation) {
+      setPrompt(pendingConversation.prompt);
+      setResult(pendingConversation.result);
+      setConv(EMPTY_CHAT);
+    }
+
     setBossHp(100);
     setLoading(false);
   }
@@ -237,19 +295,30 @@ export default function BattlePage() {
     setSaved(null);
     setShowFullResponse(false);
     setCopyNotice(null);
+    setAiNotice(null);
+    setConv(null);
     try {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId) }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ code: 'ai_unavailable' }));
       if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
       if (data.code === 'too_similar') { setCopyNotice(data); return; }
+      if (data.code === 'ai_unavailable') { setAiNotice(data.error || AI_UNAVAILABLE); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
       setResult(data);
+      // Zielona w kroku 1 rozmowy: zaliczenie i próba zapisują się dopiero po odpowiedzi AI w kroku 2
+      if (data.conversation?.awaitingReply) {
+        rememberConversation(levelId, prompt, data);
+        setConv(EMPTY_CHAT);
+        animateAndSave(data, false);
+        return;
+      }
       await animateAndSave(data);
     } catch (err) {
+      if (level?.config?.conversation) { setAiNotice(AI_UNAVAILABLE); return; }
       setResult({ score: 0, error: true, co_poszlo_dobrze: '—', co_poprawic: err.message, wskazowka: 'Sprawdź połączenie i spróbuj ponownie — ta próba nie została zapisana.' });
     } finally {
       setEvaluating(false);
@@ -277,7 +346,7 @@ export default function BattlePage() {
     animateAndSave(data);
   }
 
-  async function animateAndSave(data) {
+  async function animateAndSave(data, save = true) {
     if (data.error) return;
     const score = data.score;
     const zoneMode = data.mode === 'zones';
@@ -299,7 +368,14 @@ export default function BattlePage() {
       setTimeout(() => { setShakeTarget(null); setFloatingText(null); }, 900);
     }
     setTimeout(() => setAttackEffect(null), 1000);
+    if (!save) return;
 
+    const error = await saveBattle(data);
+    if (error) setResult(r => ({ ...r, error: true, co_poprawic: error }));
+  }
+
+  // Zwraca komunikat błędu albo null, gdy próba została zapisana
+  async function saveBattle(data) {
     const res = await fetch('/api/battle/complete', {
       method: 'POST',
       headers: apiHeaders(),
@@ -312,11 +388,8 @@ export default function BattlePage() {
       }),
     });
     const savedData = await res.json();
-    if (res.status === 401 || savedData.code === 'session_mismatch') { expireSession(savedData.error); return; }
-    if (!res.ok) {
-      setResult(r => ({ ...r, error: true, co_poprawic: savedData.error || 'Nie udało się zapisać próby.' }));
-      return;
-    }
+    if (res.status === 401 || savedData.code === 'session_mismatch') { expireSession(savedData.error); return null; }
+    if (!res.ok) return savedData.error || 'Nie udało się zapisać próby.';
     setSaved(savedData);
 
     const id = parseInt(levelId);
@@ -331,12 +404,58 @@ export default function BattlePage() {
     if (savedData.gameOver) {
       setLives(0); setPlayerHp(0);
       setTimeout(() => setOverlay('game-over'), 1200);
-      return;
+      return null;
     }
     if (savedData.newLives !== undefined && savedData.newLives < lives) {
       setTimeout(() => { setLives(savedData.newLives); setPlayerHp(Math.round((savedData.newLives / 3) * 100)); }, 900);
     }
     showProgress(savedData);
+    return null;
+  }
+
+  function updateChat(patch) {
+    setConv(c => ({ ...EMPTY_CHAT, ...c, ...patch }));
+  }
+
+  // Odpowiedź uczestnika w podglądzie: w 1.2 pierwsza odpowiedź zalicza zadanie, w pozostałych nie zmienia oceny
+  async function sendReply() {
+    const chat = conv || EMPTY_CHAT;
+    if (chat.sending || chat.saving || !result) return;
+    const reply = chat.reply.trim();
+    if (!reply) return;
+    const minWords = cfg.conversation?.reply_min_words || 1;
+    if (reply.split(/\s+/).length < minWords) {
+      updateChat({ error: `Napisz co najmniej ${minWords} słowa.` });
+      return;
+    }
+    if (detectRedZone(reply, cfg.red_terms).length) {
+      updateChat({ error: 'Zamień dane z czerwonej strefy na placeholder i wyślij jeszcze raz.' });
+      return;
+    }
+    updateChat({ sending: true, error: null });
+    const history = [{ role: 'assistant', content: result.aiResponse }, ...chat.history, { role: 'user', content: reply }];
+    try {
+      const res = await fetch('/api/battle/converse', {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({ levelId: id, prompt, history }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
+      if (!res.ok) { updateChat({ sending: false, error: data.error || AI_UNAVAILABLE }); return; }
+      updateChat({ sending: false, reply: '', history: [...chat.history, { role: 'user', content: reply }, { role: 'assistant', content: data.aiReply }] });
+      if (cfg.conversation && !chat.done) await finishConversation();
+    } catch {
+      updateChat({ sending: false, error: AI_UNAVAILABLE });
+    }
+  }
+
+  async function finishConversation() {
+    updateChat({ saving: true, saveFailed: false, error: null });
+    const error = await saveBattle(result).catch(() => 'Nie udało się zapisać zaliczenia.');
+    if (error) { updateChat({ saving: false, saveFailed: true, error: `${error} Kliknij „Zapisz zaliczenie”.` }); return; }
+    forgetConversation(id);
+    updateChat({ saving: false, done: true });
   }
 
   function showProgress(savedData) {
@@ -384,6 +503,8 @@ export default function BattlePage() {
 
   function retry(newPrompt) {
     if (result && !result.error) setLastAttempt({ score: result.score, zone: result.zone });
+    if (conv) forgetConversation(id);
+    setConv(null);
     setResult(null);
     setSaved(null);
     setBlindAnswer(null);
@@ -434,7 +555,7 @@ export default function BattlePage() {
   }
 
   function lockReason(lvl) {
-    return lockReasonOf(lvl, moduleLevels, bestScores, module?.active_block, player?.role === 'admin', completedVia);
+    return lockReasonOf(lvl, moduleLevels, bestScores, module?.active_block, bypassesLocks(player?.role), completedVia);
   }
 
   function isLevelLocked(lvl) {
@@ -464,8 +585,18 @@ export default function BattlePage() {
   const zoneMode = !!cfg?.zones;
   const livesEnabled = module?.lives_enabled !== false;
   const id = parseInt(levelId);
+  const chatMode = zoneMode && chatEnabled(cfg, module?.day_number) && !!result?.aiResponse && !result.error && !result.redZoneDetected?.length;
+  const replyRequired = chatMode && !!cfg.conversation;
+  const awaitingReply = replyRequired && !!result.conversation?.awaitingReply && !conv?.done;
+  const chatHistory = conv?.history || [];
+  const repliesSent = chatHistory.filter(m => m.role === 'user').length;
+  const lastAiText = chatHistory.length ? chatHistory.at(-1).content : result?.aiResponse;
+  const repliesLeft = MAX_FOLLOW_UPS - repliesSent;
+  const canReply = chatMode && repliesLeft > 0 && !conv?.saveFailed
+    && (replyRequired ? awaitingReply || (!!conv?.done && hasQuestions(lastAiText)) : hasQuestions(lastAiText));
   const bossLine = evaluating
     ? (evalStage === 0 ? 'Hmm, zobaczmy co AI z tym zrobi…' : 'Czytam uważnie… jeszcze chwilka.')
+    : awaitingReply ? 'Dobrze! AI zadało Ci pytania. Odpowiedz mu krótko, kilkoma słowami.'
     : result && !result.error ? (zoneMode ? zoneBossLine(result.zone) : bossReaction(result.score)) : level?.boss_dialogue;
   const nextLevel = getNextLevel();
   const nextLocked = isLevelLocked(nextLevel);
@@ -483,32 +614,24 @@ export default function BattlePage() {
   const exerciseLabel = cfg?.label || (level?.code ? `ĆWICZENIE ${level.code}` : 'ZADANIE');
   const relatedLevel = cfg?.related_code ? moduleLevels.find(l => l.code === cfg.related_code) : null;
   const relatedPrompt = relatedLevel ? modulePrompts[relatedLevel.id] : null;
+  // Dzień 2 dzieli się na nazwane moduły — licznik pokazuje postęp w module bieżącego zadania
+  const counterLevels = cfg?.block_name ? moduleLevels.filter(l => (l.block || 1) === (level.block || 1)) : moduleLevels;
   const chips = [...PROMPT_BLOCKS, ...(cfg?.chips || []).map(c => ({ key: c.label, label: c.label, text: c.text }))];
 
   return (
-    <div className={`battle-root${zoneMode ? ' is-zone' : ''}`} style={{ background: '#0d0d20' }}>
+    <div className={`battle-root${zoneMode ? ' is-zone' : ''}${result ? ' has-result' : ''}`} style={{ background: '#0d0d20' }}>
 
       {roomBg && (
         <img
           src={roomBg}
-          alt="Pokój"
+          alt=""
           className="pixel-art battle-bg"
+          onError={e => { e.currentTarget.style.display = 'none'; }}
           style={{ width: '100%', height: '100%', maxWidth: 'none', objectFit: 'cover', objectPosition: 'center top', zIndex: 0 }}
         />
       )}
 
-      <div className="battle-shade" style={{
-        zIndex: 1, pointerEvents: 'none',
-        background: 'linear-gradient(to right, rgba(5,5,18,0.85) 0%, rgba(5,5,18,0.65) 38%, rgba(5,5,18,0.1) 60%, transparent 75%)',
-      }} />
-
-      {flash && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 150, pointerEvents: 'none',
-          background: flash === 'white' ? 'rgba(255,255,255,0.35)' : 'rgba(247,79,79,0.3)',
-          animation: 'flash-fade 0.25s ease-out forwards',
-        }} />
-      )}
+      <div className="battle-shade" style={{ zIndex: 1, pointerEvents: 'none', background: 'rgba(5,5,18,0.82)' }} />
 
       {showConfetti && (
         <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 400, overflow: 'hidden' }}>
@@ -631,7 +754,7 @@ export default function BattlePage() {
               className="chip-button"
               style={{ fontFamily: PIXEL, fontSize: 11, flexShrink: 0 }}
             >
-              📋 {moduleLevels.filter(l => isPassed(l, bestScores, completedVia)).length}/{moduleLevels.length} {showLevelList ? '▲' : '▼'}
+              📋 {counterLevels.filter(l => isPassed(l, bestScores, completedVia)).length}/{counterLevels.length} {showLevelList ? '▲' : '▼'}
             </button>
           </div>
         )}
@@ -648,76 +771,68 @@ export default function BattlePage() {
       </div>
 
       <div className="battle-stage">
-      {/* ===== LEWY PANEL ===== */}
-      <div ref={panelRef} className="battle-panel" style={{
-        background: 'rgba(6,4,20,0.82)', backdropFilter: 'blur(8px)',
-        borderRight: '1px solid rgba(79,142,247,0.15)',
-      }}>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{
-            fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: typeColor, background: 'rgba(10,10,26,0.9)',
-            border: `1px solid ${typeColor}`, padding: '6px 10px', borderRadius: 2,
-          }}>
-            {zoneMode
-              ? <>{cfg.boss ? '👑 ' : ''}{exerciseLabel} · {'⭐'.repeat(cfg.difficulty || 1)} · {cfg.duration}</>
-              : <>ZADANIE {level?.level_number}/{module?.total_levels} · {level?.type === 'solo' ? '⚡ SOLO' : level?.type === 'fix_prompt' ? '🔧 NAPRAW PROMPT' : '👁 ZGADNIJ AI'}</>}
+      {/* ===== LEWA KOLUMNA: ZADANIE I PISANIE ===== */}
+      <section className="battle-main" aria-label="Zadanie">
+        <header className="battle-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px 12px', flexWrap: 'wrap' }}>
+            <span style={{
+              fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: typeColor, background: 'rgba(10,10,26,0.9)',
+              border: `1px solid ${typeColor}`, padding: '5px 9px', borderRadius: 2, flexShrink: 0,
+            }}>
+              {zoneMode
+                ? <>{cfg.boss ? '👑 ' : ''}{exerciseLabel.toUpperCase()}</>
+                : <>ZADANIE {level?.level_number}/{module?.total_levels} · {level?.type === 'solo' ? '⚡ SOLO' : level?.type === 'fix_prompt' ? '🔧 NAPRAW PROMPT' : '👁 ZGADNIJ AI'}</>}
+            </span>
+            <span style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)', lineHeight: 1.4 }}>
+              {zoneMode ? (
+                <>
+                  {cfg.difficulty ? <>{'⭐'.repeat(cfg.difficulty)} · </> : null}
+                  {cfg.duration ? <>⏱ {cfg.duration} · </> : null}
+                  <span style={{ color: 'var(--gold)' }}>{level.xp_reward} XP</span>
+                  {cfg.bonus ? <> + bonus <span style={{ color: 'var(--gold)' }}>{cfg.bonus.xp}</span></> : null}
+                </>
+              ) : personalBest !== undefined
+                ? <>Rekord: <span style={{ color: scoreColorOf(personalBest) }}>{personalBest}/100</span></>
+                : <>Do zdobycia: <span style={{ color: 'var(--gold)' }}>{level?.xp_reward} XP</span></>}
+            </span>
           </div>
-          <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)' }}>
-            {zoneMode
-              ? <><span style={{ color: 'var(--gold)' }}>{level.xp_reward} XP</span>{cfg.bonus ? <> + bonus <span style={{ color: 'var(--gold)' }}>{cfg.bonus.xp}</span></> : null}</>
-              : personalBest !== undefined
-              ? <>Rekord: <span style={{ color: scoreColorOf(personalBest) }}>{personalBest}/100</span></>
-              : <>Do zdobycia: <span style={{ color: 'var(--gold)' }}>{level?.xp_reward} XP</span></>}
-          </div>
-        </div>
+          {zoneMode && (
+            <h1 className="battle-title">
+              {cfg.department ? `${cfg.department} · ` : ''}{level.title}
+            </h1>
+          )}
+        </header>
 
-        {zoneMode && (
-          <div style={{ fontFamily: PIXEL, fontSize: 12, color: 'var(--white)', lineHeight: 1.6 }}>{level.title}</div>
-        )}
+        <div className="battle-main-scroll">
+          {lockNotice && (
+            <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'rgba(247,200,79,0.1)', border: '1px solid var(--gold)', borderRadius: 4, padding: '10px 12px', fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: '#f3e3b0', lineHeight: 1.45 }}>
+              <span style={{ flex: 1 }}>🔒 {lockNotice}</span>
+              <button onClick={() => { setLockNotice(null); sessionStorage.removeItem('lockNotice'); }} className="chip-button" aria-label="Zamknij komunikat" style={{ flexShrink: 0 }}>✕</button>
+            </div>
+          )}
 
-        {lockNotice && (
-          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'rgba(247,200,79,0.1)', border: '1px solid var(--gold)', borderRadius: 4, padding: '10px 12px', fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#f3e3b0', lineHeight: 1.45 }}>
-            <span style={{ flex: 1 }}>🔒 {lockNotice}</span>
-            <button onClick={() => { setLockNotice(null); sessionStorage.removeItem('lockNotice'); }} className="chip-button" aria-label="Zamknij komunikat" style={{ flexShrink: 0 }}>✕</button>
-          </div>
-        )}
+          {!result && passedHere && (
+            <PassedAttempt
+              zone={savedZones[id]}
+              score={bestScores[id]}
+              prompt={level.type === 'blind_test' ? null : modulePrompts[id]}
+              feedback={savedFeedback[id]}
+              via={completedVia[id]}
+            />
+          )}
 
-        {!result && passedHere && (
-          <PassedAttempt
-            zone={savedZones[id]}
-            score={bestScores[id]}
-            prompt={level.type === 'blind_test' ? null : modulePrompts[id]}
-            feedback={savedFeedback[id]}
-            via={completedVia[id]}
-          />
-        )}
-
-        {/* ---------- ZADANIE + INPUT ---------- */}
-        {!result && (
-          <>
-            {zoneMode ? (
-              <>
-                <ExerciseBrief level={level} relatedPrompt={relatedPrompt} onInsert={(t) => { setPrompt(t); setTimeout(() => textareaRef.current?.focus(), 0); }} />
-                <ReferencePrompt
-                  key={skipState?.done ? 'ref-open' : 'ref'}
-                  reference={cfg.reference}
-                  unlocked={referenceUnlocked}
-                  defaultOpen={!!skipState?.done}
-                  reason="Porównaj ze swoim."
-                />
-                <RedZoneBanner />
-              </>
-            ) : (
-            <div style={{ background: 'rgba(15,12,36,0.95)', border: '1px solid rgba(79,142,247,0.3)', borderRadius: 4, padding: '12px 14px', flexShrink: 0 }}>
-              <SectionLabel color="var(--accent)">📋 TWOJE ZADANIE</SectionLabel>
-              <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.55, fontWeight: 600 }}>
+          {zoneMode ? (
+            <ExerciseBrief level={level} relatedPrompt={relatedPrompt} onInsert={(t) => { setPrompt(t); setTimeout(() => textareaRef.current?.focus(), 0); }} />
+          ) : (
+            <div className="battle-steps" style={{ background: 'rgba(15,12,36,0.97)', border: '2px solid rgba(79,142,247,0.5)', borderRadius: 4, padding: '12px 14px', flexShrink: 0 }}>
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 18, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>🎯 Co masz zrobić</div>
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 18, color: 'var(--white)', lineHeight: 1.5, fontWeight: 600 }}>
                 {level?.task_description}
               </div>
               {level?.type === 'fix_prompt' && level?.broken_prompt && (
                 <div style={{ marginTop: 10, background: 'rgba(247,79,79,0.1)', border: '1px solid var(--red)', padding: '8px 12px', borderRadius: 3 }}>
-                  <SectionLabel color="var(--red)">❌ ZŁY PROMPT DO POPRAWY</SectionLabel>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: '#ff9999', fontStyle: 'italic', fontWeight: 600 }}>
+                  <SectionLabel color="#ff8a8a">❌ ZŁY PROMPT DO POPRAWY</SectionLabel>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: '#ffb0b0', fontStyle: 'italic', fontWeight: 600, lineHeight: 1.5 }}>
                     „{level.broken_prompt}”
                   </div>
                 </div>
@@ -725,316 +840,366 @@ export default function BattlePage() {
               {level?.type !== 'blind_test' && level?.goal_description && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)' }}>
                   <SectionLabel color="var(--gold)">🎯 SZEF OCENI, CZY:</SectionLabel>
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: '#f3e3b0', lineHeight: 1.5, fontWeight: 600 }}>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: '#f3e3b0', lineHeight: 1.5, fontWeight: 600 }}>
                     {level.goal_description}
                   </div>
                 </div>
               )}
             </div>
-            )}
+          )}
 
-            {level?.type === 'blind_test' ? (
-              <BlindTestInput options={blindOptions} blindAnswer={blindAnswer} setBlindAnswer={setBlindAnswer} disabled={evaluating} />
-            ) : (
-              <>
-                {!zoneMode && <div>
-                  <SectionLabel color="var(--muted)">🧱 KLOCKI DOBREGO PROMPTA — KLIKNIJ, ABY WSTAWIĆ</SectionLabel>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {chips.map(b => (
-                      <button key={b.key} onClick={() => insertBlock(b.text)} disabled={evaluating} className="chip-button">{b.label}</button>
-                    ))}
-                    {level?.type === 'fix_prompt' && level?.broken_prompt && (
-                      <button onClick={() => insertBlock(level.broken_prompt)} disabled={evaluating} className="chip-button" style={{ borderColor: 'rgba(247,79,79,0.5)', color: '#ff9999' }}>
-                        ↳ Wstaw zły prompt
-                      </button>
-                    )}
-                  </div>
-                </div>}
+          {!result && level?.type === 'blind_test' && (
+            <BlindTestInput options={blindOptions} blindAnswer={blindAnswer} setBlindAnswer={setBlindAnswer} disabled={evaluating} />
+          )}
 
-                {lastAttempt && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 600, color: 'var(--muted)' }}>
-                    {lastAttempt.zone
-                      ? <>Poprzednia próba: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> — popraw prompt i wejdź wyżej!</>
-                      : <>Poprzednia próba: <span style={{ color: scoreColorOf(lastAttempt.score) }}>{lastAttempt.score}/100</span> — popraw prompt i pobij ten wynik!</>}
-                  </div>
-                )}
-                {showExample && <OtherExample example={cfg.other_example} />}
-                {canSkip && <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={skipNext} />}
-              </>
-            )}
-
-            <div className="battle-composer">
-              {level?.type !== 'blind_test' && (
-                <>
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <textarea
-                      ref={textareaRef}
-                      value={prompt}
-                      onChange={e => setPrompt(e.target.value)}
-                      readOnly={evaluating}
-                      autoFocus
-                      placeholder={'Napisz prompt tak, jakbyś zlecał zadanie nowemu asystentowi…\n\nWskazówka: użyj klocków powyżej.'}
-                      rows={7}
-                      className="prompt-input"
-                      style={{ opacity: evaluating ? 0.6 : 1 }}
-                      onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleAttack(); } }}
-                    />
-                    <div style={{
-                      position: 'absolute', right: 12, bottom: 6, fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700,
-                      color: wordCount >= 30 ? 'var(--green)' : wordCount >= 12 ? 'var(--gold)' : 'var(--muted)', pointerEvents: 'none',
-                    }}>
-                      {wordCount} słów
-                    </div>
-                  </div>
-                  {copyNotice && (
-                    <div role="alert" style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#f3e3b0', background: 'rgba(247,201,79,0.12)', border: '1px solid var(--gold)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
-                      ✋ {copyNotice.error}
-                      <div style={{ fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>Podobieństwo: {copyNotice.similarity}% · ta próba nie została policzona.</div>
-                    </div>
-                  )}
-                  {redZoneHits.length > 0 && (
-                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: '#ff9999', background: 'rgba(247,79,79,0.12)', border: '1px solid var(--red)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
-                      🚫 Wygląda na dane z czerwonej strefy: {redZoneHits.join(', ')}. Zamień je na placeholder — taki prompt nie zostanie wysłany do AI.
-                    </div>
-                  )}
-                </>
-              )}
-
-              {evaluating ? (
-                <EvaluatingPanel stage={evalStage} bossName={module?.boss_name} tip={LOADING_TIPS[tipIndex]} isBlind={level?.type === 'blind_test'} />
-              ) : (
-                <button
-                  onClick={handleAttack}
-                  disabled={(!prompt.trim() && level?.type !== 'blind_test') || (level?.type === 'blind_test' && !blindAnswer)}
-                  className="pixel-button btn-primary attack-button"
-                >
-                  {level?.type === 'blind_test' ? '👁  SPRAWDŹ' : '⚔  ATAKUJ PROMPTEM'}
-                  {level?.type !== 'blind_test' && <span style={{ display: 'block', fontFamily: "'Rajdhani'", fontSize: 16, lineHeight: 1.2, marginTop: 4, letterSpacing: 0, opacity: 0.75 }}>Ctrl / ⌘ + Enter</span>}
-                </button>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ---------- WYNIKI ---------- */}
-        {result && (
-          <>
-            {zoneMode && !result.error ? (
-              <>
-                {lastAttempt?.zone && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)' }}>
-                    Poprzednio: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> → teraz: <span style={{ color: ZONES[result.zone].color }}>{ZONES[result.zone].label.toLowerCase()}</span>
-                  </div>
-                )}
-                <ZoneResult result={result} level={level} saved={saved} />
-              </>
-            ) : (
-            <div style={{
-              background: 'rgba(10,8,28,0.96)', border: `2px solid ${scoreColor}`, borderRadius: 4, padding: '14px 16px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, flexShrink: 0,
-              boxShadow: `0 0 24px ${scoreColor}33`, animation: 'pop-in 0.35s cubic-bezier(.34,1.56,.64,1)',
-            }}>
-              <div>
-                <div style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>WYNIK</div>
-                <div style={{ fontFamily: PIXEL, fontSize: 28, color: scoreColor }}>{displayScore}<span style={{ fontSize: 12, color: 'var(--muted)' }}>/100</span></div>
-                {lastAttempt && !result.error && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginTop: 6, color: result.score > lastAttempt.score ? 'var(--green)' : result.score < lastAttempt.score ? 'var(--red)' : 'var(--muted)' }}>
-                    {result.score > lastAttempt.score ? '▲' : result.score < lastAttempt.score ? '▼' : '='} {result.score - lastAttempt.score >= 0 ? '+' : ''}{result.score - lastAttempt.score} vs poprzednia próba
-                  </div>
-                )}
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: scoreColor }}>
-                  {result.error ? '⚠ BŁĄD' : result.score >= 70 ? '⚡ ŚWIETNY!' : result.score >= 40 ? '⚔ ZALICZONE' : '💀 PUDŁO!'}
-                </div>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginTop: 6, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
-                  {result.error ? '' : !saved ? 'zapisywanie…'
-                    : xpGained > 0 ? `+${xpGained} XP`
-                    : saved.practice ? 'trening — pobij rekord, by zdobyć XP'
-                    : result.score < 40 ? (livesEnabled ? '−1 ❤️  (min. 40 by zaliczyć)' : 'min. 40 by zaliczyć') : '+0 XP'}
-                </div>
-              </div>
-            </div>
-            )}
-
-            {result.kryteria && <CriteriaBars kryteria={result.kryteria} />}
-
-            <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={result.co_poszlo_dobrze} color="var(--green)" />
-            {!(zoneMode && result.zone === 'yellow' && result.co_poprawic) && (
-              <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={result.co_poprawic} color="var(--red)" />
-            )}
-            <FeedbackBox icon="💡" label="WSKAZÓWKA" text={result.wskazowka} color="var(--gold)" />
-
-            {showExample && result.zone !== 'green' && !result.error && <OtherExample example={cfg.other_example} />}
-            {canSkip && !result.error && (
-              <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} />
-            )}
-
-            {result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
-              <div style={{ background: 'rgba(79,247,160,0.06)', border: '1px dashed var(--green)', borderRadius: 4, padding: '10px 12px' }}>
-                <SectionLabel color="var(--green)">✨ PRZYKŁAD LEPSZEGO PROMPTA</SectionLabel>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
-                  {result.lepszy_prompt}
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  <button onClick={() => retry(result.lepszy_prompt)} className="chip-button" style={{ borderColor: 'var(--green)', color: 'var(--green)' }}>✏️ Użyj jako bazy</button>
-                  <button onClick={copyBetterPrompt} className="chip-button">{copied ? '✓ Skopiowano' : '📋 Kopiuj'}</button>
-                </div>
-              </div>
-            )}
-
-            {level?.type !== 'blind_test' && prompt && (
-              <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '0 12px' }}>
-                <summary className="fold-summary" style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.6, color: 'var(--muted)', cursor: 'pointer' }}>TWÓJ PROMPT</summary>
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, marginBottom: 10, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
-              </details>
-            )}
-
-            {zoneMode && !result.error && !result.redZoneDetected?.length && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  onClick={saveToLibrary}
-                  disabled={libraryState === 'saving' || libraryState === 'saved'}
-                  className="chip-button"
-                  style={{ borderColor: 'var(--gold)', color: 'var(--gold)', padding: '8px 12px' }}
-                >
-                  {libraryState === 'saved' ? '✓ Zapisano w bibliotece' : libraryState === 'saving' ? 'Zapisuję…' : '💾 Zapisz prompt w bibliotece'}
-                </button>
-                {libraryState === 'error' && <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--red)', fontWeight: 600 }}>Nie udało się zapisać — spróbuj ponownie.</span>}
-              </div>
-            )}
-
-            {zoneMode && referenceUnlocked && cfg.reveal && <RevealAfterPass reveal={cfg.reveal} />}
-
-            {zoneMode && (
-              <ReferencePrompt
-                key={skipState?.done ? 'ref-open' : 'ref'}
-                reference={cfg.reference}
-                unlocked={referenceUnlocked}
-                defaultOpen={!!skipState?.done}
-                reason="Porównaj ze swoim."
-              />
-            )}
-
-            {zoneMode && cfg.footer && result.zone === 'green' && (
-              <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 600, color: '#cfd3ff', borderLeft: '3px solid var(--accent)', padding: '4px 10px' }}>
-                📌 {cfg.footer}
-              </div>
-            )}
-
-            {result.aiResponse && (
-              <div style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(79,142,247,0.3)', borderRadius: 4, padding: '10px 12px' }}>
-                <SectionLabel color="var(--accent)">🤖 {level?.type === 'blind_test' ? 'ODPOWIEDŹ' : zoneMode ? 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM' : 'CO AI ZROBIŁA Z TWOIM PROMPTEM'}</SectionLabel>
-                {zoneMode && (
-                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)', fontWeight: 600, marginTop: -4, marginBottom: 8 }}>
-                    Ocena dotyczy Twojego prompta. Placeholdery mogą sprawić, że wynik będzie ogólny — to w porządku.
-                  </div>
-                )}
-                <div style={{
-                  fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.55, fontWeight: 500,
-                  whiteSpace: 'pre-wrap', maxHeight: showFullResponse ? 'none' : '11rem', overflow: 'hidden', position: 'relative',
-                }}>
-                  {result.aiResponse}
-                  {!showFullResponse && result.aiResponse.length > 400 && (
-                    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 50, background: 'linear-gradient(transparent, rgba(10,10,26,1))' }} />
-                  )}
-                </div>
-                {result.aiResponse.length > 400 && (
-                  <button onClick={() => setShowFullResponse(s => !s)} className="chip-button" style={{ marginTop: 8 }}>
-                    {showFullResponse ? '▲ Zwiń' : '▼ Pokaż całą odpowiedź'}
+          {!result && !zoneMode && level?.type !== 'blind_test' && (
+            <div>
+              <SectionLabel color="var(--muted)">🧱 KLOCKI DOBREGO PROMPTA — KLIKNIJ, ABY WSTAWIĆ</SectionLabel>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {chips.map(b => (
+                  <button key={b.key} onClick={() => insertBlock(b.text)} disabled={evaluating} className="chip-button">{b.label}</button>
+                ))}
+                {level?.type === 'fix_prompt' && level?.broken_prompt && (
+                  <button onClick={() => insertBlock(level.broken_prompt)} disabled={evaluating} className="chip-button" style={{ borderColor: 'rgba(247,79,79,0.5)', color: '#ff9999' }}>
+                    ↳ Wstaw zły prompt
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {zoneMode && <RedZoneBanner />}
+
+          {result && chatMode && (
+            <div ref={chatRef} className="battle-chat">
+              <ConversationChat
+                title={cfg.system_test ? 'TEST: ODPOWIEDŹ TWOJEGO ASYSTENTA' : 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM'}
+                description="Tak AI odpowiedziało na Twój prompt. Jeśli zadało pytania, możesz na nie odpowiedzieć."
+                messages={[
+                  cfg.system_test
+                    ? { from: 'me', label: '👤 Klient napisał', text: cfg.system_test.message }
+                    : { from: 'me', text: prompt },
+                  { from: 'ai', label: cfg.system_test ? '🤖 Twój asystent' : undefined, text: result.aiResponse },
+                  ...chatHistory.map(m => m.role === 'user'
+                    ? { from: 'me', label: cfg.system_test ? 'Ty (jako klient)' : undefined, text: m.content }
+                    : { from: 'ai', label: cfg.system_test ? '🤖 Twój asystent' : undefined, text: m.content }),
+                ]}
+                canReply={canReply}
+                replyLabel={awaitingReply ? cfg.conversation.reply_label : 'Odpowiedz AI'}
+                replyNote={replyRequired ? null : 'Nieobowiązkowe — ocena i XP dotyczą tylko pierwszego promptu.'}
+                reply={conv?.reply || ''}
+                onReplyChange={(text) => updateChat({ reply: text, error: null })}
+                onSend={sendReply}
+                sending={!!(conv?.sending || conv?.saving)}
+                error={conv?.error}
+                replyRedZone={conv?.reply ? detectRedZone(conv.reply, cfg.red_terms) : []}
+                endNote={repliesLeft <= 0 ? 'To koniec rozmowy w tym zadaniu.' : null}
+                saveFailed={!!conv?.saveFailed}
+                onSave={finishConversation}
+                done={replyRequired && !!conv?.done}
+                doneText="✅ Zadanie zaliczone."
+                finishLabel={nextLevel && !nextLocked ? `DALEJ: ${nextLevel.label || nextLevel.code || 'następne'} ▶` : '🗺 Wróć na mapę'}
+                onFinish={() => router.push(nextLevel && !nextLocked ? `/battle/${nextLevel.id}` : '/map')}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* ---------- POLE PROMPTU (przyklejone na dole) ---------- */}
+        {!result && (
+          <div className="battle-composer">
+            {lastAttempt && level?.type !== 'blind_test' && (
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 600, color: 'var(--muted)', lineHeight: 1.4 }}>
+                {lastAttempt.zone
+                  ? <>Poprzednia próba: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> — popraw prompt i wejdź wyżej!</>
+                  : <>Poprzednia próba: <span style={{ color: scoreColorOf(lastAttempt.score) }}>{lastAttempt.score}/100</span> — popraw prompt i pobij ten wynik!</>}
+              </div>
+            )}
+            {level?.type !== 'blind_test' && (
+              <>
+                {copyNotice && (
+                  <div role="alert" style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: '#f3e3b0', background: 'rgba(247,201,79,0.12)', border: '1px solid var(--gold)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
+                    ✋ {copyNotice.error}
+                    <div style={{ fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>Podobieństwo: {copyNotice.similarity}% · ta próba nie została policzona.</div>
+                  </div>
+                )}
+                {aiNotice && (
+                  <div role="alert" style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: '#f3e3b0', background: 'rgba(247,201,79,0.12)', border: '1px solid var(--gold)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
+                    📡 {aiNotice}
+                    <div style={{ fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>Ta próba się nie liczy. Twój prompt jest zachowany.</div>
+                  </div>
+                )}
+                {redZoneHits.length > 0 && (
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: '#ffb0b0', background: 'rgba(247,79,79,0.12)', border: '1px solid var(--red)', borderRadius: 4, padding: '8px 12px', animation: 'pop-in 0.2s ease-out' }}>
+                    🚫 Wygląda na dane z czerwonej strefy: {redZoneHits.join(', ')}. Zamień je na placeholder — taki prompt nie zostanie wysłany do AI.
+                  </div>
+                )}
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <textarea
+                    ref={textareaRef}
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    readOnly={evaluating}
+                    autoFocus
+                    aria-label="Twój prompt"
+                    placeholder="Wpisz tutaj swój prompt…"
+                    rows={3}
+                    className="prompt-input"
+                    style={{ opacity: evaluating ? 0.6 : 1 }}
+                    onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleAttack(); } }}
+                  />
+                  <div style={{
+                    position: 'absolute', right: 14, bottom: 6, fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700,
+                    color: wordCount >= 30 ? 'var(--green)' : wordCount >= 12 ? 'var(--gold)' : 'var(--muted)', pointerEvents: 'none',
+                  }}>
+                    {wordCount} słów
+                  </div>
+                </div>
+              </>
             )}
 
-            <div className="battle-actions" style={{ background: 'linear-gradient(transparent, rgba(6,4,20,0.95) 30%)' }}>
-              {!overlay && ((zoneMode ? !(result.zone === 'green' && result.bonus) : result.score < 70) || result.error) && (
-                <button onClick={() => retry()} className="pixel-button" style={{ fontSize: 11, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
-                  {level?.type === 'blind_test' ? '🔄 JESZCZE RAZ' : zoneMode && result.zone === 'green' ? '⭐ POWALCZ O BONUS' : zoneMode ? '✏️ NOWA PRÓBA' : '✏️ POPRAW PROMPT'}
-                </button>
+            {evaluating ? (
+              <EvaluatingPanel stage={evalStage} bossName={module?.boss_name} tip={LOADING_TIPS[tipIndex]} isBlind={level?.type === 'blind_test'} />
+            ) : (
+              <button
+                onClick={handleAttack}
+                disabled={(!prompt.trim() && level?.type !== 'blind_test') || (level?.type === 'blind_test' && !blindAnswer)}
+                className="pixel-button btn-primary attack-button"
+              >
+                {level?.type === 'blind_test' ? '👁  SPRAWDŹ' : '⚔  ATAKUJ PROMPTEM'}
+                {level?.type !== 'blind_test' && <span className="attack-hint">Ctrl / ⌘ + Enter</span>}
+              </button>
+            )}
+          </div>
+        )}
+
+        {result && (
+          <div className="battle-actions">
+            {!overlay && !awaitingReply && ((zoneMode ? !(result.zone === 'green' && result.bonus) : result.score < 70) || result.error) && (
+              <button onClick={() => retry()} className="pixel-button" style={{ fontSize: 11, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
+                {level?.type === 'blind_test' ? '🔄 JESZCZE RAZ' : zoneMode && result.zone === 'green' ? '⭐ POWALCZ O BONUS' : zoneMode ? '✏️ NOWA PRÓBA' : '✏️ POPRAW PROMPT'}
+              </button>
+            )}
+            {nextLevel && !nextLocked && !replyRequired && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
+              <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 8px' }}>
+                {nextLevel.code ? `DALEJ: ${nextLevel.label || nextLevel.code} ▶` : 'NASTĘPNE ▶'}
+              </button>
+            )}
+            {nextLevel && !awaitingReply && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
+              <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
+                🔒 {nextLevel.label || nextLevel.code || 'Następne'} odblokuje trener
+              </div>
+            )}
+            <button onClick={() => router.push('/map')} className="pixel-button battle-actions-map" style={{ fontSize: 11, padding: '12px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
+              🗺 MAPA
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* ===== PRAWA KOLUMNA: SCENA, WYNIK, POMOC ===== */}
+      <aside className="battle-side" aria-label="Pomoc">
+        <div className="battle-scene">
+          {roomBg && <img src={roomBg} alt="" className="pixel-art battle-scene-bg" onError={e => { e.currentTarget.style.display = 'none'; }} />}
+
+          {flash && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none',
+              background: flash === 'white' ? 'rgba(255,255,255,0.35)' : 'rgba(247,79,79,0.3)',
+              animation: 'flash-fade 0.25s ease-out forwards',
+            }} />
+          )}
+
+          {floatingText && (
+            <div style={{
+              position: 'absolute', top: 8, right: '4%',
+              fontFamily: PIXEL, fontSize: 22, color: attackEffect === 'miss' ? 'var(--red)' : 'var(--gold)',
+              textShadow: '3px 3px 0 rgba(0,0,0,0.9)', animation: 'float-up 1s ease-out forwards',
+              pointerEvents: 'none', zIndex: 30, whiteSpace: 'nowrap',
+            }}>{floatingText}</div>
+          )}
+
+          {attackEffect && (
+            <div style={{
+              position: 'absolute', bottom: '30%', left: '50%', fontSize: 34,
+              animation: attackEffect === 'miss' ? 'projectile-left 0.5s ease-in forwards' : 'projectile-right 0.5s ease-in forwards',
+              pointerEvents: 'none', zIndex: 20,
+            }}>
+              {attackEffect === 'hit' ? '⚡' : attackEffect === 'weak' ? '⚔' : '💀'}
+            </div>
+          )}
+
+          <div className="battle-fighter battle-fighter--player" style={{ animation: shakeTarget === 'player' ? 'shake 0.6s ease-out' : 'none' }}>
+            <div className="battle-sprite"><Character characterId={player?.character_id} size={6} animate /></div>
+            <div className="battle-fighter-name" style={{ color: 'var(--green)', borderColor: 'var(--green)' }}>{player?.display_name || 'TY'}</div>
+          </div>
+
+          <div key={bossLine} className="battle-bubble" style={{
+            border: `2px solid ${result && !result.error ? scoreColor : 'var(--accent2)'}`,
+            animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
+          }}>
+            <div className="battle-bubble-tail" style={{ borderLeftColor: result && !result.error ? scoreColor : 'var(--accent2)' }} />
+            <div className="battle-bubble-who">
+              {module?.boss_name}{module?.boss_title ? ` · ${module.boss_title}` : ''}
+            </div>
+            <div className="battle-bubble-body">„{bossLine}”</div>
+          </div>
+
+          <div className="battle-fighter battle-fighter--boss" style={{
+            animation: shakeTarget === 'boss' ? 'shake 0.6s ease-out' : evaluating ? 'boss-think 1.2s ease-in-out infinite' : 'none',
+          }}>
+            <div className="battle-sprite"><Character characterId={module?.boss_character_id} size={6} animate flipped /></div>
+            <div className="battle-fighter-name" style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}>{module?.boss_name}</div>
+          </div>
+        </div>
+
+        <div ref={sideScrollRef} className="battle-side-scroll">
+          {/* ---------- WYNIK ---------- */}
+          {result && (
+            <div ref={resultRef} className="battle-result">
+              {zoneMode && !result.error ? (
+                <>
+                  {lastAttempt?.zone && (
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)' }}>
+                      Poprzednio: <span style={{ color: ZONES[lastAttempt.zone].color }}>{ZONES[lastAttempt.zone].label.toLowerCase()}</span> → teraz: <span style={{ color: ZONES[result.zone].color }}>{ZONES[result.zone].label.toLowerCase()}</span>
+                    </div>
+                  )}
+                  <ZoneResult result={result} level={level} saved={saved} pending={awaitingReply}>
+                    {result.co_poprawic && result.zone !== 'yellow' && (
+                      <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={result.co_poprawic} color="var(--red)" />
+                    )}
+                    <FeedbackBox icon="💡" label="WSKAZÓWKA" text={result.wskazowka} color="var(--gold)" />
+                    <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={result.co_poszlo_dobrze} color="var(--green)" />
+                  </ZoneResult>
+                </>
+              ) : (
+                <>
+                  <div style={{
+                    background: 'rgba(10,8,28,0.96)', border: `2px solid ${scoreColor}`, borderRadius: 4, padding: '14px 16px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, flexShrink: 0,
+                    boxShadow: `0 0 24px ${scoreColor}33`, animation: 'pop-in 0.35s cubic-bezier(.34,1.56,.64,1)',
+                  }}>
+                    <div>
+                      <div style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>WYNIK</div>
+                      <div style={{ fontFamily: PIXEL, fontSize: 28, color: scoreColor }}>{displayScore}<span style={{ fontSize: 12, color: 'var(--muted)' }}>/100</span></div>
+                      {lastAttempt && !result.error && (
+                        <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, marginTop: 6, color: result.score > lastAttempt.score ? 'var(--green)' : result.score < lastAttempt.score ? 'var(--red)' : 'var(--muted)' }}>
+                          {result.score > lastAttempt.score ? '▲' : result.score < lastAttempt.score ? '▼' : '='} {result.score - lastAttempt.score >= 0 ? '+' : ''}{result.score - lastAttempt.score} vs poprzednia próba
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: scoreColor }}>
+                        {result.error ? '⚠ BŁĄD' : result.score >= 70 ? '⚡ ŚWIETNY!' : result.score >= 40 ? '⚔ ZALICZONE' : '💀 PUDŁO!'}
+                      </div>
+                      <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, marginTop: 6, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
+                        {result.error ? '' : !saved ? 'zapisywanie…'
+                          : xpGained > 0 ? `+${xpGained} XP`
+                          : saved.practice ? 'trening — pobij rekord, by zdobyć XP'
+                          : result.score < 40 ? (livesEnabled ? '−1 ❤️  (min. 40 by zaliczyć)' : 'min. 40 by zaliczyć') : '+0 XP'}
+                      </div>
+                    </div>
+                  </div>
+                  <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={result.co_poszlo_dobrze} color="var(--green)" />
+                  <FeedbackBox icon="🛠" label="CO POPRAWIĆ" text={result.co_poprawic} color="var(--red)" />
+                  <FeedbackBox icon="💡" label="WSKAZÓWKA" text={result.wskazowka} color="var(--gold)" />
+                  {result.kryteria && <CriteriaBars kryteria={result.kryteria} />}
+                </>
               )}
-              {nextLevel && !nextLocked && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
-                <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 8px' }}>
-                  {nextLevel.code ? `DALEJ: ${nextLevel.label || nextLevel.code} ▶` : 'NASTĘPNE ▶'}
-                </button>
-              )}
-              {nextLevel && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
-                <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
-                  🔒 {nextLevel.label || nextLevel.code || 'Następne'} odblokuje trener
+
+              {result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
+                <div style={{ background: 'rgba(79,247,160,0.06)', border: '1px dashed var(--green)', borderRadius: 4, padding: '10px 12px' }}>
+                  <SectionLabel color="var(--green)">✨ PRZYKŁAD LEPSZEGO PROMPTA</SectionLabel>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
+                    {result.lepszy_prompt}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    <button onClick={() => retry(result.lepszy_prompt)} className="chip-button" style={{ borderColor: 'var(--green)', color: 'var(--green)' }}>✏️ Użyj jako bazy</button>
+                    <button onClick={copyBetterPrompt} className="chip-button">{copied ? '✓ Skopiowano' : '📋 Kopiuj'}</button>
+                  </div>
                 </div>
               )}
-              <button onClick={() => router.push('/map')} className="pixel-button battle-actions-map" style={{ fontSize: 11, padding: '12px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--muted)' }}>
-                🗺 MAPA
-              </button>
+
+              {result.aiResponse && !chatMode && (
+                <div style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(79,142,247,0.3)', borderRadius: 4, padding: '10px 12px' }}>
+                  <SectionLabel color="var(--accent)">🤖 {level?.type === 'blind_test' ? 'ODPOWIEDŹ' : cfg?.system_test ? 'TEST: ODPOWIEDŹ TWOJEGO ASYSTENTA' : zoneMode ? 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM' : 'CO AI ZROBIŁA Z TWOIM PROMPTEM'}</SectionLabel>
+                  {cfg?.system_test && (
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: '#f3e3b0', fontWeight: 700, marginTop: -4, marginBottom: 8 }}>
+                      Klient napisał: „{cfg.system_test.message}”
+                    </div>
+                  )}
+                  {zoneMode && !cfg?.system_test && (
+                    <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--muted)', fontWeight: 600, marginTop: -4, marginBottom: 8 }}>
+                      Ocena dotyczy Twojego prompta. Placeholdery mogą sprawić, że wynik będzie ogólny — to w porządku.
+                    </div>
+                  )}
+                  <div style={{
+                    fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.55, fontWeight: 500,
+                    whiteSpace: 'pre-wrap', maxHeight: showFullResponse ? 'none' : '11rem', overflow: 'hidden', position: 'relative',
+                  }}>
+                    {result.aiResponse}
+                    {!showFullResponse && result.aiResponse.length > 400 && (
+                      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 50, background: 'linear-gradient(transparent, rgba(10,10,26,1))' }} />
+                    )}
+                  </div>
+                  {result.aiResponse.length > 400 && (
+                    <button onClick={() => setShowFullResponse(s => !s)} className="chip-button" style={{ marginTop: 8 }}>
+                      {showFullResponse ? '▲ Zwiń' : '▼ Pokaż całą odpowiedź'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {level?.type !== 'blind_test' && prompt && !chatMode && (
+                <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 4, padding: '0 12px' }}>
+                  <summary className="fold-summary" style={{ fontFamily: "'Rajdhani'", fontSize: 18, fontWeight: 700, lineHeight: 1.4, color: 'var(--muted)', cursor: 'pointer' }}>Twój prompt</summary>
+                  <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, marginBottom: 10, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
+                </details>
+              )}
+
+              {zoneMode && !result.error && !result.redZoneDetected?.length && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={saveToLibrary}
+                    disabled={libraryState === 'saving' || libraryState === 'saved'}
+                    className="chip-button"
+                    style={{ borderColor: 'var(--gold)', color: 'var(--gold)', padding: '8px 12px' }}
+                  >
+                    {libraryState === 'saved' ? '✓ Zapisano w bibliotece' : libraryState === 'saving' ? 'Zapisuję…' : '💾 Zapisz prompt w bibliotece'}
+                  </button>
+                  {libraryState === 'error' && <span style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--red)', fontWeight: 600 }}>Nie udało się zapisać — spróbuj ponownie.</span>}
+                </div>
+              )}
+
+              {zoneMode && referenceUnlocked && cfg.reveal && <RevealAfterPass reveal={cfg.reveal} />}
+
+              {zoneMode && cfg.footer && result.zone === 'green' && (
+                <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 600, color: '#cfd3ff', borderLeft: '3px solid var(--accent)', padding: '4px 10px' }}>
+                  📌 {cfg.footer}
+                </div>
+              )}
             </div>
-          </>
-        )}
-      </div>
+          )}
 
-      {/* ===== SCENA ===== */}
-      <div className="battle-scene">
-      {floatingText && (
-        <div style={{
-          position: 'absolute', top: '30%', left: '65%', transform: 'translateX(-50%)',
-          fontFamily: PIXEL, fontSize: 26, color: attackEffect === 'miss' ? 'var(--red)' : 'var(--gold)',
-          textShadow: '3px 3px 0 rgba(0,0,0,0.9)', animation: 'float-up 1s ease-out forwards',
-          pointerEvents: 'none', zIndex: 30, whiteSpace: 'nowrap',
-        }}>{floatingText}</div>
-      )}
-
-      {attackEffect && (
-        <div style={{
-          position: 'absolute', top: '48%', left: '52%', fontSize: 40,
-          animation: attackEffect === 'miss' ? 'projectile-left 0.5s ease-in forwards' : 'projectile-right 0.5s ease-in forwards',
-          pointerEvents: 'none', zIndex: 20,
-        }}>
-          {attackEffect === 'hit' ? '⚡' : attackEffect === 'weak' ? '⚔' : '💀'}
+          {/* ---------- POMOC ---------- */}
+          <div className="battle-help">
+            {zoneMode && <ExerciseHelp level={level} />}
+            {canSkip && !result?.error && (
+              <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={result ? null : skipNext} />
+            )}
+            {zoneMode && (
+              <ReferencePrompt
+                key={skipState?.done || conv?.done ? 'ref-open' : 'ref'}
+                reference={cfg.reference}
+                unlocked={referenceUnlocked}
+                defaultOpen={!!(skipState?.done || conv?.done)}
+                reason="Porównaj ze swoim."
+              />
+            )}
+            {showExample && !(result && (result.error || result.zone === 'green')) && <OtherExample example={cfg.other_example} folded />}
+          </div>
         </div>
-      )}
-
-      {/* ===== GRACZ ===== */}
-      <div className="battle-fighter battle-fighter--player" style={{
-        animation: shakeTarget === 'player' ? 'shake 0.6s ease-out' : 'none',
-      }}>
-        <Character characterId={player?.character_id} size={14} animate />
-        <div style={{
-          fontFamily: PIXEL, fontSize: 11, color: 'var(--green)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
-          border: '2px solid var(--green)', whiteSpace: 'nowrap', marginTop: 4, boxShadow: '0 0 8px rgba(79,247,160,0.3)',
-        }}>{player?.display_name || 'TY'}</div>
-      </div>
-
-      {/* ===== SZEF ===== */}
-      <div className="battle-fighter battle-fighter--boss" style={{
-        animation: shakeTarget === 'boss' ? 'shake 0.6s ease-out' : evaluating ? 'boss-think 1.2s ease-in-out infinite' : 'none',
-      }}>
-        <Character characterId={module?.boss_character_id} size={14} animate flipped />
-        <div style={{
-          fontFamily: PIXEL, fontSize: 11, color: 'var(--accent2)', background: 'rgba(8,8,20,0.95)', padding: '5px 14px',
-          border: '2px solid var(--accent2)', whiteSpace: 'nowrap', marginTop: 4, boxShadow: '0 0 8px rgba(247,79,142,0.3)',
-        }}>{module?.boss_name}</div>
-      </div>
-
-      {/* ===== DYMEK SZEFA ===== */}
-      <div key={bossLine} className="battle-bubble" style={{
-        background: 'rgba(8,4,24,0.97)',
-        border: `2px solid ${result && !result.error ? scoreColor : 'var(--accent2)'}`, borderRadius: 4,
-        padding: '14px 18px',
-        boxShadow: '0 0 24px rgba(247,79,142,0.2), 0 8px 32px rgba(0,0,0,0.95)',
-        animation: 'pop-in 0.3s cubic-bezier(.34,1.56,.64,1)',
-      }}>
-        <div className="battle-bubble-tail" style={{
-          position: 'absolute', bottom: -11, right: '18%', width: 0, height: 0,
-          borderLeft: '11px solid transparent', borderRight: '11px solid transparent',
-          borderTop: `11px solid ${result && !result.error ? scoreColor : 'var(--accent2)'}`,
-        }} />
-        <div style={{ fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: 'var(--accent2)', marginBottom: 8, letterSpacing: 1 }}>
-          {module?.boss_name} · {module?.boss_title}
-        </div>
-        <div className="battle-bubble-body" style={{ fontFamily: "'Rajdhani'", fontSize: 18, color: 'var(--white)', lineHeight: 1.6, fontWeight: 600 }}>
-          „{bossLine}”
-        </div>
-      </div>
-      </div>
+      </aside>
       </div>
     </div>
   );
@@ -1064,13 +1229,13 @@ function EvaluatingPanel({ stage, bossName, tip, isBlind }) {
             <span style={{ fontFamily: PIXEL, fontSize: 11, color: done ? 'var(--green)' : 'var(--accent)', width: 16, flexShrink: 0 }}>
               {done ? '✓' : active ? <span style={{ animation: 'blink 0.8s steps(2) infinite' }}>▶</span> : '·'}
             </span>
-            <span style={{ fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--white)' }}>
+            <span style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--white)' }}>
               {label}{active && <span className="loading-dots" />}
             </span>
           </div>
         );
       })}
-      <div style={{ marginTop: 6, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)', fontFamily: "'Rajdhani'", fontSize: 16, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5 }}>
+      <div style={{ marginTop: 6, paddingTop: 10, borderTop: '1px dashed rgba(247,201,79,0.3)', fontFamily: "'Rajdhani'", fontSize: 17, color: '#f3e3b0', fontWeight: 600, lineHeight: 1.5 }}>
         💡 {tip}
       </div>
     </div>
@@ -1087,7 +1252,7 @@ function CriteriaBars({ kryteria }) {
           const color = v >= 18 ? 'var(--green)' : v >= 10 ? 'var(--gold)' : 'var(--red)';
           return (
             <div key={c.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0 8px', fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, marginBottom: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0 8px', fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, marginBottom: 3 }}>
                 <span style={{ color: 'var(--white)' }}>{c.icon} {c.label}</span>
                 <span style={{ color }}>{v}/25</span>
               </div>
@@ -1145,7 +1310,7 @@ function BlindTestInput({ options, blindAnswer, setBlindAnswer, disabled }) {
           <div style={{ fontFamily: PIXEL, fontSize: 11, color: blindAnswer === opt.key ? 'var(--accent2)' : 'var(--muted)', marginBottom: 8 }}>
             {blindAnswer === opt.key ? '▶ ' : ''}ODPOWIEDŹ {opt.label}
           </div>
-          <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, lineHeight: 1.5, fontWeight: 600 }}>
+          <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, lineHeight: 1.5, fontWeight: 600 }}>
             {opt.text}
           </div>
         </button>
@@ -1205,7 +1370,7 @@ function PassedAttempt({ zone, score, prompt, feedback, via }) {
         {prompt && (
           <div>
             <SectionLabel color="var(--muted)">TWÓJ PROMPT</SectionLabel>
-            <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
+            <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
           </div>
         )}
         <FeedbackBox icon="✅" label="CO POSZŁO DOBRZE" text={feedback?.co_poszlo_dobrze} color="var(--green)" />
@@ -1218,9 +1383,9 @@ function PassedAttempt({ zone, score, prompt, feedback, via }) {
 
 function FeedbackBox({ icon, label, text, color }) {
   return (
-    <div style={{ background: 'rgba(10,10,26,0.95)', borderTop: `1px solid ${color}55`, borderRight: `1px solid ${color}55`, borderBottom: `1px solid ${color}55`, borderLeft: `3px solid ${color}`, borderRadius: 4, padding: '10px 12px' }}>
+    <div className="feedback-box" style={{ background: 'rgba(10,10,26,0.95)', borderTop: `1px solid ${color}55`, borderRight: `1px solid ${color}55`, borderBottom: `1px solid ${color}55`, borderLeft: `3px solid ${color}`, borderRadius: 4, padding: '10px 12px' }}>
       <SectionLabel color={color}>{icon} {label}</SectionLabel>
-      <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--white)', lineHeight: 1.5, fontWeight: 600 }}>
+      <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, fontWeight: 600 }}>
         {text || '—'}
       </div>
     </div>

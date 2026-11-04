@@ -17,6 +17,7 @@ export async function GET(req) {
       .from('levels')
       .select('id, code, title, sort_order, level_number, block, config, modules!inner(day_number)')
       .eq('modules.day_number', day)
+      .eq('active', true)
       .order('sort_order')
       .order('level_number');
 

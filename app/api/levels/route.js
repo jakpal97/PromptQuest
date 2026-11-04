@@ -13,16 +13,19 @@ export async function GET(req) {
         .from('levels')
         .select('*, modules(*)')
         .eq('id', levelId)
-        .single();
+        .eq('active', true)
+        .maybeSingle();
       if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!level) return Response.json({ error: 'Nie ma takiego ćwiczenia.' }, { status: 404 });
       return Response.json({ level });
     }
 
     if (moduleId) {
       const { data: levels, error } = await supabase
         .from('levels')
-        .select('id, level_number, sort_order, type, code, title, block, requires:config->>requires, label:config->>label, boss:config->boss, zones:config->zones')
+        .select('id, level_number, sort_order, type, code, title, block, requires:config->>requires, label:config->>label, block_name:config->>block_name, boss:config->boss, zones:config->zones')
         .eq('module_id', moduleId)
+        .eq('active', true)
         .order('sort_order');
       if (error) return Response.json({ error: error.message }, { status: 500 });
       return Response.json({ levels });

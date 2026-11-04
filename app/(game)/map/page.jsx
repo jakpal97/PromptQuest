@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getPlayerLevel } from '@/lib/auth';
-import { nextPlayableLevel } from '@/lib/progress';
+import { nextPlayableLevel, bypassesLocks } from '@/lib/progress';
 import Character from '@/components/Character';
 
 const MODULE_NODES = [
@@ -76,7 +76,7 @@ export default function MapPage() {
   function getModuleState(moduleId) {
     if (!player) return 'locked';
     const mod = modules.find(m => m.day_number === moduleId);
-    const isAdmin = player.role === 'admin';
+    const isAdmin = bypassesLocks(player.role);
     // Kolejne dni otwiera trener w panelu admina
     if (moduleId > 1 && mod && !mod.unlocked && !isAdmin) return 'locked';
     if (moduleId < player.current_module) return 'completed';
@@ -100,7 +100,7 @@ export default function MapPage() {
     if (!levels || levels.length === 0) return;
     const { bestScores, completedVia } = scoresRes.ok ? await scoresRes.json() : { bestScores: {} };
 
-    const target = nextPlayableLevel(levels, bestScores || {}, mod?.active_block, player?.role === 'admin', completedVia || {});
+    const target = nextPlayableLevel(levels, bestScores || {}, mod?.active_block, bypassesLocks(player?.role), completedVia || {});
     if (target) router.push(`/battle/${target.id}`);
   }
 
