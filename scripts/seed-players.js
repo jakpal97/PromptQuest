@@ -11,7 +11,7 @@ async function seed() {
   console.log('🌱 Dodawanie graczy...');
 
   const players = [];
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= 11; i++) {
     players.push({
       username: `uczestnik${i}`,
       password_hash: bcrypt.hashSync(`uczestnik${i}`, 10),
@@ -45,7 +45,7 @@ async function seed() {
   }
 
   console.log('✅ Dodano/zaktualizowano graczy:');
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= 11; i++) {
     console.log(`  uczestnik${i} / uczestnik${i}`);
   }
   console.log('  admin / admin123');
