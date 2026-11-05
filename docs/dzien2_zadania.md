@@ -259,9 +259,9 @@ Napisz prompt na wiadomość „gotowe do odbioru”. Wpisz do niego kartę styl
 
 **Przykład z innej sytuacji** (Biblioteka powiadamia, że zamówiona książka czeka.): Jesteś bibliotekarką. Napisz krótką wiadomość, że zamówiona książka czeka na czytelnika. Odbiorca: mieszkańcy, często starsi, czytają SMS. Ton: serdeczny, prosty, na „Pan/Pani”. Używaj: „czeka na Pana/Panią”, „do zobaczenia”. Unikaj: „termin upływa”, „kara”. Fakty: książka czeka 7 dni, wypożyczalnia czynna 10:00–18:00. Do 35 słów.
 
-### 3.2 · Kierownictwo · Pierwszy krok łańcucha · 12 min
+### 3.2 · Kierownictwo · Wypisz ustalenia z notatek · 12 min
 
-**Sytuacja:** Masz notatki z zebrania kierowników. Później zrobisz z nich podsumowanie dla zarządu, ale po kolei. Teraz tylko pierwszy krok: wypisać fakty.
+**Sytuacja:** Masz notatki z zebrania kierowników. Później zrobisz z nich podsumowanie dla zarządu. Teraz tylko wypisz fakty.
 
 **Notatki z zebrania (do skopiowania):** Nowy cennik od 1 stycznia, dział handlowy przygotuje go do 20 listopada. Serwis dostaje dwóch nowych techników od grudnia, kadry ogłaszają rekrutację w tym tygodniu. Przegląd klimatyzacji 4 grudnia organizuje recepcja. Może w przyszłym roku nowa strona internetowa? Nikt nie wie, kto by to robił. Zarząd chce raport kwartalny do 10 stycznia, przygotowuje kierownictwo. Ktoś wspomniał o nowych krzesłach do biura, bez decyzji.
 
@@ -283,9 +283,9 @@ Napisz prompt na wiadomość „gotowe do odbioru”. Wpisz do niego kartę styl
 **Bonus +25 XP:** Każesz na końcu wypisać, czego w notatkach brakuje (np. kto odpowiada za stronę).
 **Uwaga dla oceniającego:** Dobry wynik AI ma 4 decyzje w tabeli (cennik, technicy, przegląd klimatyzacji, raport) i 2 rzeczy niepewne (strona, krzesła).
 
-**Wzorzec:** Jesteś asystentem zarządu. Z notatek poniżej zrobimy później podsumowanie dla zarządu, ale teraz tylko krok 1: wypisz decyzje, terminy i który dział za co odpowiada. Nie dopisuj niczego, czego nie ma w notatkach. Format: tabela z kolumnami decyzja / termin / dział. Pod tabelą osobno wypisz rzeczy niepewne, bez decyzji. Notatki: [wklejone notatki]
+**Wzorzec:** Jesteś asystentem zarządu. Z notatek poniżej zrobimy później podsumowanie dla zarządu. Wypisz decyzje, terminy i który dział za co odpowiada. Nie dopisuj niczego, czego nie ma w notatkach. Format: tabela z kolumnami decyzja / termin / dział. Pod tabelą osobno wypisz rzeczy niepewne, bez decyzji. Notatki: [wklejone notatki]
 
-**Przykład z innej sytuacji** (Notatki z rozmowy z klientem przed ofertą.): Jesteś handlowcem. To krok 1 przygotowania oferty: z notatek z rozmowy z klientem wypisz tylko potrzeby klienta, budżet i terminy. Niczego nie zgaduj. Lista punktów, a na końcu osobno to, czego klient nie był pewien. Notatki: [notatki]
+**Przykład z innej sytuacji** (Notatki z rozmowy z klientem przed ofertą.): Jesteś handlowcem. Z notatek z rozmowy z klientem wypisz tylko potrzeby klienta, budżet i terminy. Niczego nie zgaduj. Lista punktów, a na końcu osobno to, czego klient nie był pewien. Notatki: [notatki]
 
 ### 3.3 · Recepcja · Granice asystenta · 12 min
 
@@ -314,11 +314,11 @@ Aplikacja sprawdzi asystenta podchwytliwym pytaniem.
 
 **Przykład z innej sytuacji** (Asystent sklepu internetowego z butami.): Granice: nie obiecujesz rabatów ani terminów dostawy spoza regulaminu. Gdy nie znasz odpowiedzi, piszesz: „Nie mam tej informacji, proszę napisać na [ADRES OBSŁUGI]”. Reklamacje przekazujesz do działu obsługi. Nie prosisz o numer karty ani hasła.
 
-### 3.4 · Kierownictwo · Drugi krok łańcucha · 12 min
+### 3.4 · Kierownictwo · Mail do zarządu z listy ustaleń · 12 min
 
-**Sytuacja:** To dalszy ciąg zadania 3.2. Fakty z zebrania są już wypisane w tabeli. Teraz krok 2: z tej tabeli AI ma napisać krótkiego maila do zarządu.
+**Sytuacja:** Masz tabelę ustaleń z zebrania. Napisz prompt: AI ma z tej tabeli napisać krótkiego maila do zarządu.
 
-**Tabela z kroku 1 (do skopiowania):** Decyzja | Termin | Dział
+**Tabela ustaleń (do skopiowania):** Decyzja | Termin | Dział
 Nowy cennik | do 20 listopada | dział handlowy
 Dwóch nowych techników | od grudnia | serwis (rekrutacja: kadry)
 Przegląd klimatyzacji | 4 grudnia | recepcja
@@ -342,6 +342,6 @@ Napisz prompt: AI ma z tabeli napisać krótkiego maila do zarządu i nie dodać
 **Bonus +25 XP:** Na końcu prosisz AI, żeby samo sprawdziło: „Zanim oddasz maila, sprawdź, czy każda informacja jest w tabeli”.
 **Uwaga dla oceniającego:** Dobry wynik AI: 4 decyzje w punktach i osobno „Do decyzji” (strona, krzesła), bez nowych faktów.
 
-**Wzorzec:** Jesteś asystentem kierownika. To krok 2: z tabeli poniżej napisz krótkiego maila do zarządu. Ton rzeczowy, forma „Państwo”, do 120 słów. Decyzje wypisz w punktach z terminem i działem. Na końcu, pod nagłówkiem „Do decyzji”, wypisz sprawy bez decyzji. Używaj tylko informacji z tabeli. Jeśli coś dodajesz od siebie, oznacz to [DO SPRAWDZENIA]. Zanim oddasz maila, sprawdź, czy każda informacja jest w tabeli. Tabela: [wklejona tabela]
+**Wzorzec:** Jesteś asystentem kierownika. Z tabeli poniżej napisz krótkiego maila do zarządu. Ton rzeczowy, forma „Państwo”, do 120 słów. Decyzje wypisz w punktach z terminem i działem. Na końcu, pod nagłówkiem „Do decyzji”, wypisz sprawy bez decyzji. Używaj tylko informacji z tabeli. Jeśli coś dodajesz od siebie, oznacz to [DO SPRAWDZENIA]. Zanim oddasz maila, sprawdź, czy każda informacja jest w tabeli. Tabela: [wklejona tabela]
 
-**Przykład z innej sytuacji** (Z notatek z rozmowy z klientem jest już lista potrzeb. Krok 2: oferta.): Jesteś handlowcem. To krok 2: z listy potrzeb klienta poniżej napisz krótką propozycję oferty, do 100 słów, forma „Pan/Pani”. Używaj tylko informacji z listy. Na końcu wypisz pytania do klienta. Lista: [lista]
+**Przykład z innej sytuacji** (Z notatek z rozmowy z klientem jest już lista potrzeb. Napisz ofertę.): Jesteś handlowcem. Z listy potrzeb klienta poniżej napisz krótką propozycję oferty, do 100 słów, forma „Pan/Pani”. Używaj tylko informacji z listy. Na końcu wypisz pytania do klienta. Lista: [lista]
