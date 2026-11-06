@@ -1,6 +1,6 @@
 # Dzień 3 · zadania w aplikacji (wersja 2)
 
-Moduł A (A1–A2), quiz 10 pytań, moduł P (P1–P5) i Boss dla chętnych. Każde zadanie 100 XP + bonus 25 XP, Boss 150 XP. Bez utraty życia. Ocena łagodna: zielona przy około 70% punktów, czerwona tylko za ogólnik albo dane osobowe.
+Moduł A (A1–A2), quiz 20 pytań, moduł P (P1–P5) i Boss dla chętnych. Każde zadanie 100 XP + bonus 25 XP, Boss 150 XP. Bez utraty życia. Ocena łagodna: zielona przy około 70% punktów, czerwona tylko za ogólnik albo dane osobowe.
 
 ## Moduł A · Poczta i dokumenty (Te same polecenia, których używacie w Copilocie. Mail i notatki są gotowe w zadaniu.)
 
@@ -242,7 +242,7 @@ Ofertę wysyłam do piątku.
 
 **Przykład z innej sytuacji** (Serwis pisze maila po wizycie technika.): Jesteś pracownikiem serwisu. Napisz krótkiego maila do [KLIENT] po wizycie technika, do 80 słów. Notatki: wymieniony wałek w drukarce, następny przegląd za pół roku. Wzór: „Dzień dobry, dziękujemy za wizytę. Urządzenie działa. Pozdrawiamy, Zespół Serwisu.” Tylko fakty z notatek, resztę oznacz [DO SPRAWDZENIA].
 
-## Quiz · 10 pytań A/B/C (10 min, 100 XP, 10 XP za pytanie)
+## Quiz · 20 pytań A/B/C (15–20 min; 10 XP za pierwszą próbę, 5 za drugą, 0 za trzecią)
 
 1. Co znaczy skrót RCTF? (Dzień 1)
    - A) Rola, Kontekst, Zadanie, Format ✅ poprawna
@@ -293,3 +293,53 @@ Ofertę wysyłam do piątku.
    - A) Klikam cytat i sprawdzam w dokumencie ✅ poprawna
    - B) Wierzę, bo jest cytat
    - C) Nic, cytat wystarczy
+
+11. Co to jest „halucynacja” AI? (Dzień 1)
+   - A) AI się zawiesza i nie odpowiada
+   - B) AI pewnym tonem podaje nieprawdziwe informacje ✅ poprawna
+   - C) AI pisze za długie odpowiedzi
+
+12. Który prompt jest najlepszy? (Dzień 1)
+   - A) „Napisz maila”
+   - B) „Mail do klienta, szybko”
+   - C) „Jesteś handlowcem. Klient pyta o termin dostawy. Napisz odpowiedź, do 80 słów, na Pan/Pani.” ✅ poprawna
+
+13. W notatkach jest nazwisko klienta. Co robisz, zanim wkleisz je do AI? (Dzień 1)
+   - A) Zamieniam je na [KLIENT] ✅ poprawna
+   - B) Zostawiam, bo AI i tak zapomni
+   - C) Piszę nazwisko wielkimi literami
+
+14. Po co piszemy „Zanim zaczniesz, zadaj mi 3 pytania”? (Dzień 2)
+   - A) Żeby AI odpowiadało wolniej
+   - B) Żeby AI dopytało o brakujące informacje przed pisaniem ✅ poprawna
+   - C) Żeby AI napisało 3 wersje
+
+15. Kiedy lepiej napisać nowy prompt, zamiast poprawiać w rozmowie? (Dzień 2)
+   - A) Gdy robisz to samo zadanie regularnie ✅ poprawna
+   - B) Nigdy
+   - C) Gdy AI odpowiedziało za szybko
+
+16. Co wpisujesz w pole „Granice” asystenta? (Dzień 2)
+   - A) Ulubione kolory firmy
+   - B) Listę klientów
+   - C) Czego asystentowi nie wolno i do kogo ma odesłać klienta ✅ poprawna
+
+17. Jak napisać polecenie dla Copilota w Outlooku? (Dzień 3)
+   - A) Krótko, ale z celem, tonem i długością ✅ poprawna
+   - B) Samo „Odpisz mu”
+   - C) Jak najdłużej, ze wszystkimi szczegółami firmy
+
+18. O co możesz spokojnie zapytać w Perplexity? (Dzień 3)
+   - A) O mail klienta z jego danymi
+   - B) O obecne przepisy o pracy zdalnej ✅ poprawna
+   - C) O listę wynagrodzeń w firmie
+
+19. Do czego najlepiej nadaje się Gemini Notebook? (Dzień 3)
+   - A) Do wysyłania maili
+   - B) Do edycji zdjęć
+   - C) Do pytań o wgrane dokumenty, z cytatami ✅ poprawna
+
+20. Co jest pierwszym krokiem łańcucha? (Dzień 3)
+   - A) Wypisać fakty z notatek ✅ poprawna
+   - B) Napisać gotowy tekst
+   - C) Recenzja tekstu

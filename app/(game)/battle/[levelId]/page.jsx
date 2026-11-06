@@ -376,22 +376,27 @@ export default function BattlePage() {
     if (error) setResult(r => ({ ...r, error: true, co_poprawic: error }));
   }
 
-  async function finishQuiz(answers) {
+  async function finishQuiz(history) {
     if (evaluating) return;
     setEvaluating(true);
     const questions = level?.config?.quiz?.questions || [];
     const key = questions.map(q => q.correct);
-    const correct = answers.filter((a, i) => a === key[i]).length;
-    const promptUsed = JSON.stringify({ quiz: true, answers, key });
+    const first = history.map(row => row.first);
+    const tries = history.map(row => row.tries);
+    const xp = history.map(row => row.xp);
+    const totalXp = xp.reduce((sum, n) => sum + n, 0);
+    const firstCorrect = first.filter((a, i) => a === key[i]).length;
+    const promptUsed = JSON.stringify({ quiz: true, answers: first, key, tries, xp });
     setPrompt(promptUsed);
     const data = {
       mode: 'quiz',
-      score: correct * 10,
+      score: totalXp,
       zone: null,
       bonus: false,
-      co_poszlo_dobrze: `Poprawnych odpowiedzi: ${correct} z ${questions.length}.`,
-      co_poprawic: correct === questions.length ? null : 'Możesz wrócić do pytań, które poszły słabiej.',
-      wskazowka: 'Po każdym pytaniu widać, która odpowiedź była poprawna.',
+      firstCorrect,
+      co_poszlo_dobrze: `Za pierwszym razem: ${firstCorrect} z ${questions.length}.`,
+      co_poprawic: null,
+      wskazowka: `Suma XP: ${totalXp}. 10 XP za pierwszym razem, 5 za drugim, 0 za trzecim.`,
     };
     setResult(data);
     try {

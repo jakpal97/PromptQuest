@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Markdown from '@/components/Markdown';
 
 const PIXEL = "'Press Start 2P'";
@@ -530,48 +530,71 @@ export function ConversationChat({
 
 const KEYS = ['A', 'B', 'C'];
 
+function xpForTries(n) {
+  if (n <= 1) return 10;
+  if (n === 2) return 5;
+  return 0;
+}
+
 export function QuizPanel({ questions, onFinish, saving }) {
   const [index, setIndex] = useState(0);
-  const [picked, setPicked] = useState(null);
-  const [answers, setAnswers] = useState([]);
-  const finished = answers.length === questions.length;
-  const correctCount = answers.filter((a, i) => a === questions[i].correct).length;
+  const [wrong, setWrong] = useState(() => new Set());
+  const [flash, setFlash] = useState(null);
+  const [ok, setOk] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const [first, setFirst] = useState(null);
+  const [history, setHistory] = useState([]);
+  const finished = history.length === questions.length;
   const q = questions[index];
+  const firstCorrect = history.filter((row, i) => row.first === questions[i].correct).length;
+  const totalXp = history.reduce((sum, row) => sum + row.xp, 0);
+
+  useEffect(() => {
+    if (!flash) return undefined;
+    const t = setTimeout(() => setFlash(cur => (cur === flash ? null : cur)), 1000);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   function choose(key) {
-    if (picked || saving) return;
-    setPicked(key);
+    if (saving || ok || wrong.has(key) || flash) return;
+    const n = attempts + 1;
+    setAttempts(n);
+    if (!first) setFirst(key);
+    if (key !== q.correct) {
+      setWrong(prev => new Set(prev).add(key));
+      setFlash(key);
+      return;
+    }
+    setOk(true);
   }
 
   function next() {
-    if (!picked) return;
-    const nextAnswers = [...answers, picked];
-    setAnswers(nextAnswers);
-    setPicked(null);
-    if (nextAnswers.length === questions.length) {
-      onFinish(nextAnswers);
+    if (!ok) return;
+    const row = { first, tries: attempts, xp: xpForTries(attempts) };
+    const nextHist = [...history, row];
+    setHistory(nextHist);
+    if (nextHist.length === questions.length) {
+      onFinish(nextHist);
       return;
     }
-    setIndex(nextAnswers.length);
+    setIndex(nextHist.length);
+    setWrong(new Set());
+    setFlash(null);
+    setOk(false);
+    setAttempts(0);
+    setFirst(null);
   }
 
   if (finished) {
     return (
       <Card color="rgba(79,247,160,0.45)" background="rgba(8,30,22,0.96)">
         <Heading color="var(--green)">Wynik quizu</Heading>
-        <div style={{ ...large, marginBottom: 8 }}>
-          Poprawnych: <b>{correctCount}</b> z {questions.length} · {correctCount * 10} XP
+        <div style={{ ...large, marginBottom: 6 }}>
+          Za pierwszym razem: <b>{firstCorrect}</b> z {questions.length}
         </div>
-        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {questions.map((item, i) => {
-            const ok = answers[i] === item.correct;
-            return (
-              <li key={i} style={{ ...large, color: ok ? 'var(--green)' : '#ffb0b0' }}>
-                {ok ? '✓' : '✗'} {i + 1}. Twoja: {answers[i]} · poprawna: {item.correct}
-              </li>
-            );
-          })}
-        </ul>
+        <div style={{ ...large }}>
+          Suma XP: <b>{totalXp}</b>
+        </div>
       </Card>
     );
   }
@@ -584,40 +607,56 @@ export function QuizPanel({ questions, onFinish, saving }) {
       <Heading color="var(--accent)">{q.q}</Heading>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
         {KEYS.map(k => {
-          const isPicked = picked === k;
-          const isCorrect = k === q.correct;
+          const isWrong = wrong.has(k);
+          const isFlash = flash === k;
+          const isGreen = ok && k === q.correct;
           let border = 'var(--border)';
           let color = 'var(--white)';
-          if (picked) {
-            if (isCorrect) { border = 'var(--green)'; color = 'var(--green)'; }
-            else if (isPicked) { border = 'var(--red)'; color = '#ffb0b0'; }
+          let background = 'transparent';
+          let opacity = 1;
+          if (isFlash) {
+            border = 'var(--red)';
+            color = '#ffd0d0';
+            background = 'rgba(247,79,79,0.45)';
+          } else if (isWrong) {
+            border = 'rgba(247,79,79,0.35)';
+            color = 'var(--muted)';
+            opacity = 0.45;
+          } else if (isGreen) {
+            border = 'var(--green)';
+            color = 'var(--green)';
+            background = 'rgba(79,247,160,0.12)';
           }
           return (
             <button
               key={k}
               type="button"
               onClick={() => choose(k)}
-              disabled={!!picked || saving}
+              disabled={saving || ok || isWrong || !!flash}
               className="chip-button"
               style={{
                 justifyContent: 'flex-start', textAlign: 'left', minHeight: 48, fontSize: 17,
-                borderColor: border, color, opacity: picked && !isPicked && !isCorrect ? 0.55 : 1,
+                borderColor: border, color, background, opacity,
+                transition: 'background 0.15s ease, opacity 0.2s ease',
               }}
             >
               <b style={{ marginRight: 8 }}>{k}.</b> {q.options[k]}
-              {picked && isCorrect ? ' ✓' : ''}
-              {picked && isPicked && !isCorrect ? ' ✗' : ''}
             </button>
           );
         })}
       </div>
-      {picked && (
+      {(flash || wrong.size > 0) && !ok && (
+        <div style={{ ...large, color: '#ffb0b0', marginTop: 12 }}>
+          Niestety nie. Spróbuj jeszcze raz.
+        </div>
+      )}
+      {ok && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ ...large, color: picked === q.correct ? 'var(--green)' : '#ffb0b0', marginBottom: 10 }}>
-            {picked === q.correct ? 'Dobrze!' : `Poprawna odpowiedź: ${q.correct}`}
+          <div style={{ ...large, color: 'var(--green)', marginBottom: 10 }}>
+            Dobrze! <span style={{ color: 'var(--gold)' }}>+{xpForTries(attempts)} XP</span>
           </div>
           <button onClick={next} disabled={saving} className="pixel-button btn-primary" style={{ fontSize: 12, padding: '12px 10px' }}>
-            {index + 1 === questions.length ? (saving ? 'Zapisuję…' : 'Zakończ quiz') : 'Następne pytanie'}
+            {index + 1 === questions.length ? (saving ? 'Zapisuję…' : 'Zakończ quiz') : 'Dalej'}
           </button>
         </div>
       )}

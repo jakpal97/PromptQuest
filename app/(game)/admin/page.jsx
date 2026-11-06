@@ -513,7 +513,7 @@ export default function AdminPage() {
             {quizErrors.length > 0 && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ marginBottom: 12, fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)' }}>
-                  QUIZ · PYTANIA Z NAJWIĘKSZĄ LICZBĄ BŁĘDÓW
+                  QUIZ · PIERWSZA ODPOWIEDŹ UCZESTNIKA (które pytania sprawiają kłopot)
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 16, marginBottom: 8 }}>
                   <thead>
