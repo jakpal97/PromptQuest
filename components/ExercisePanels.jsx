@@ -527,3 +527,100 @@ export function ConversationChat({
     </Card>
   );
 }
+
+const KEYS = ['A', 'B', 'C'];
+
+export function QuizPanel({ questions, onFinish, saving }) {
+  const [index, setIndex] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const [answers, setAnswers] = useState([]);
+  const finished = answers.length === questions.length;
+  const correctCount = answers.filter((a, i) => a === questions[i].correct).length;
+  const q = questions[index];
+
+  function choose(key) {
+    if (picked || saving) return;
+    setPicked(key);
+  }
+
+  function next() {
+    if (!picked) return;
+    const nextAnswers = [...answers, picked];
+    setAnswers(nextAnswers);
+    setPicked(null);
+    if (nextAnswers.length === questions.length) {
+      onFinish(nextAnswers);
+      return;
+    }
+    setIndex(nextAnswers.length);
+  }
+
+  if (finished) {
+    return (
+      <Card color="rgba(79,247,160,0.45)" background="rgba(8,30,22,0.96)">
+        <Heading color="var(--green)">Wynik quizu</Heading>
+        <div style={{ ...large, marginBottom: 8 }}>
+          Poprawnych: <b>{correctCount}</b> z {questions.length} · {correctCount * 10} XP
+        </div>
+        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {questions.map((item, i) => {
+            const ok = answers[i] === item.correct;
+            return (
+              <li key={i} style={{ ...large, color: ok ? 'var(--green)' : '#ffb0b0' }}>
+                {ok ? '✓' : '✗'} {i + 1}. Twoja: {answers[i]} · poprawna: {item.correct}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    );
+  }
+
+  return (
+    <Card color="rgba(79,142,247,0.45)">
+      <div style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+        PYTANIE {index + 1} / {questions.length}
+      </div>
+      <Heading color="var(--accent)">{q.q}</Heading>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+        {KEYS.map(k => {
+          const isPicked = picked === k;
+          const isCorrect = k === q.correct;
+          let border = 'var(--border)';
+          let color = 'var(--white)';
+          if (picked) {
+            if (isCorrect) { border = 'var(--green)'; color = 'var(--green)'; }
+            else if (isPicked) { border = 'var(--red)'; color = '#ffb0b0'; }
+          }
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => choose(k)}
+              disabled={!!picked || saving}
+              className="chip-button"
+              style={{
+                justifyContent: 'flex-start', textAlign: 'left', minHeight: 48, fontSize: 17,
+                borderColor: border, color, opacity: picked && !isPicked && !isCorrect ? 0.55 : 1,
+              }}
+            >
+              <b style={{ marginRight: 8 }}>{k}.</b> {q.options[k]}
+              {picked && isCorrect ? ' ✓' : ''}
+              {picked && isPicked && !isCorrect ? ' ✗' : ''}
+            </button>
+          );
+        })}
+      </div>
+      {picked && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ ...large, color: picked === q.correct ? 'var(--green)' : '#ffb0b0', marginBottom: 10 }}>
+            {picked === q.correct ? 'Dobrze!' : `Poprawna odpowiedź: ${q.correct}`}
+          </div>
+          <button onClick={next} disabled={saving} className="pixel-button btn-primary" style={{ fontSize: 12, padding: '12px 10px' }}>
+            {index + 1 === questions.length ? (saving ? 'Zapisuję…' : 'Zakończ quiz') : 'Następne pytanie'}
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}

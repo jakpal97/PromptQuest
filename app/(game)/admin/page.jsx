@@ -11,6 +11,7 @@ export default function AdminPage() {
   const [players, setPlayers] = useState([]);
   const [modules, setModules] = useState([]);
   const [analytics, setAnalytics] = useState([]);
+  const [quizErrors, setQuizErrors] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -87,6 +88,7 @@ export default function AdminPage() {
     if (!battles) return;
 
     const grouped = {};
+    const quizByQ = {};
     battles.forEach(b => {
       const key = b.level_id;
       if (!grouped[key]) {
@@ -104,6 +106,16 @@ export default function AdminPage() {
       grouped[key].scores.push(b.score);
       grouped[key].attempts.push(b.attempt_number || 1);
       if (b.co_poprawic) grouped[key].feedback.push(b.co_poprawic);
+      try {
+        const parsed = JSON.parse(b.prompt_used || '');
+        if (!parsed?.quiz || !Array.isArray(parsed.answers) || !Array.isArray(parsed.key)) return;
+        parsed.answers.forEach((a, i) => {
+          const n = i + 1;
+          if (!quizByQ[n]) quizByQ[n] = { n, wrong: 0, total: 0 };
+          quizByQ[n].total += 1;
+          if (a !== parsed.key[i]) quizByQ[n].wrong += 1;
+        });
+      } catch { /* nie quiz */ }
     });
 
     const rows = Object.values(grouped).map(g => {
@@ -124,6 +136,7 @@ export default function AdminPage() {
     }).sort((a, b) => (a.module_day - b.module_day) || (a.level_number - b.level_number));
 
     setAnalytics(rows);
+    setQuizErrors(Object.values(quizByQ).sort((a, b) => (b.wrong / b.total) - (a.wrong / a.total) || a.n - b.n));
   }
 
   async function loadSessions() {
@@ -461,7 +474,7 @@ export default function AdminPage() {
                             color: (mod.active_block || 1) >= b ? 'var(--gold)' : 'var(--muted)',
                           }}
                         >
-                          {(mod.active_block || 1) >= b ? '🔓' : '🔒'} {b}
+                          {(mod.active_block || 1) >= b ? '🔓' : '🔒'} {b}{mod.block_labels?.[b] ? ` · ${String(mod.block_labels[b]).split('·')[0].trim()}` : ''}
                         </button>
                       ))}
                     </div>
@@ -497,6 +510,32 @@ export default function AdminPage() {
             <div style={{ marginBottom: 12, fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)' }}>
               STATUS LEVELÓW (na podstawie wyników)
             </div>
+            {quizErrors.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ marginBottom: 12, fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)' }}>
+                  QUIZ · PYTANIA Z NAJWIĘKSZĄ LICZBĄ BŁĘDÓW
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Rajdhani'", fontSize: 16, marginBottom: 8 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg2)' }}>
+                      {['Pytanie', 'Błędów', 'Odpowiedzi', '% błędów'].map(h => (
+                        <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: "'Press Start 2P'", fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quizErrors.map(row => (
+                      <tr key={row.n} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '8px 10px' }}>Pytanie {row.n}</td>
+                        <td style={{ padding: '8px 10px', color: row.wrong / row.total > 0.4 ? 'var(--red)' : 'var(--white)' }}>{row.wrong}</td>
+                        <td style={{ padding: '8px 10px' }}>{row.total}</td>
+                        <td style={{ padding: '8px 10px' }}>{Math.round((row.wrong / row.total) * 100)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {analytics.length === 0 ? (
               <div style={{ fontFamily: "'Rajdhani'", fontSize: 16, color: 'var(--muted)', padding: 20 }}>
                 Brak danych — nikt jeszcze nie walczył.

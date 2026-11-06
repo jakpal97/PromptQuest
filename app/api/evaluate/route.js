@@ -139,6 +139,23 @@ async function evaluateZones(userPrompt, level, playerId) {
   const green = cfg.zones.green || [];
   const words = userPrompt.trim().split(/\s+/).length;
 
+  const day3Red = day3DataRed(level.code, userPrompt);
+  if (day3Red) {
+    return {
+      mode: 'zones',
+      zone: 'red',
+      score: ZONE_SCORE.red,
+      bonus: false,
+      redZoneDetected: day3Red.detected,
+      spelnione: [],
+      co_poszlo_dobrze: 'Dobrze, że ćwiczysz — lepiej złapać to tutaj niż w prawdziwej pracy.',
+      co_poprawic: day3Red.hint,
+      wskazowka: day3Red.hint,
+      lepszy_prompt: null,
+      aiResponse: null,
+    };
+  }
+
   // Dane z czerwonej strefy nie mogą trafić do zewnętrznego modelu
   const detected = detectRedZone(userPrompt, cfg.red_terms);
   if (detected.length) {
@@ -159,6 +176,21 @@ async function evaluateZones(userPrompt, level, playerId) {
 
   // 1.4: poprawka w rozmowie — oceniaj TYLKO 5 błędów, bez modelu i bez RCTF
   if (level.code === '1.4') return evaluate14Only(userPrompt, cfg);
+  if (level.code === 'A1' && isGenericRed(userPrompt)) {
+    return {
+      mode: 'zones',
+      zone: 'red',
+      score: ZONE_SCORE.red,
+      bonus: false,
+      spelnione: [],
+      co_poszlo_dobrze: 'Dobrze, że ćwiczysz — krótka komenda to dobry start.',
+      co_poprawic: 'Napisz, co ma napisać, jakim tonem i jak długo.',
+      wskazowka: 'Copilot widzi maila, ale polecenie musi mieć treść, ton i długość.',
+      przyklad_zdania: 'Potwierdź dostawę 12 listopada. Ton uprzejmy, maksymalnie 80 słów.',
+      lepszy_prompt: null,
+      aiResponse: null,
+    };
+  }
 
   const [aiResponse, previous] = await Promise.all([
     executePrompt(userPrompt, cfg),
@@ -312,8 +344,26 @@ async function evaluate14Only(userPrompt, cfg) {
   };
 }
 
+function day3DataRed(code, prompt) {
+  if (code === 'P2') {
+    const left = [];
+    if (/Ann[ay]\s+Nowak/i.test(prompt)) left.push('„Anna Nowak”');
+    if (/512[\s-]?345[\s-]?678/.test(prompt)) left.push('„512 345 678”');
+    if (/Lipowa/i.test(prompt)) left.push('„Lipowa”');
+    if (left.length) return { detected: left, hint: `Usuń z prompta: ${left.join(', ')}.` };
+  }
+  if (code === 'BOSS') {
+    const left = [];
+    if (/Kowalski/i.test(prompt)) left.push('„Kowalski”');
+    if (/601[\s-]?234[\s-]?567/.test(prompt)) left.push('„601 234 567”');
+    if (left.length) return { detected: left, hint: 'Wpisz [KLIENT].' };
+  }
+  return null;
+}
+
 function noRctfTask(code) {
-  return code === '1.1' || code === '1.4' || code === '2.2' || code === '3.3';
+  return code === '1.1' || code === '1.4' || code === '2.2' || code === '3.3'
+    || code === 'A1' || code === 'A2' || code === 'P3' || code === 'P5';
 }
 
 function greenNeeded(n) {
@@ -359,7 +409,7 @@ function applySofterThresholds(code, prompt, zone, green, spelnione) {
 
 function isGenericRed(prompt) {
   const words = prompt.trim().split(/\s+/).length;
-  return words < 10 && /popraw to|sprawdź fakty|^lepiej\b|jeszcze raz/i.test(prompt);
+  return words < 10 && /popraw to|sprawdź fakty|^lepiej\b|jeszcze raz|odpisz mu|napisz lepiej/i.test(prompt);
 }
 
 function dropCriterion(miss, green, zone, spelnione, braki, result) {

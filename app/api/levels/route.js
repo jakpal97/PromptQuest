@@ -23,7 +23,7 @@ export async function GET(req) {
     if (moduleId) {
       const { data: levels, error } = await supabase
         .from('levels')
-        .select('id, level_number, sort_order, type, code, title, block, requires:config->>requires, label:config->>label, block_name:config->>block_name, boss:config->boss, zones:config->zones')
+        .select('id, level_number, sort_order, type, code, title, block, requires:config->>requires, label:config->>label, block_name:config->>block_name, boss:config->boss, extra:config->extra, quiz:config->quiz, zones:config->zones')
         .eq('module_id', moduleId)
         .eq('active', true)
         .order('sort_order');

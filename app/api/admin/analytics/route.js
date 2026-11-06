@@ -13,7 +13,7 @@ export async function GET(req) {
 
     const { data: battles } = await supabase
       .from('battles')
-      .select('level_id, score, co_poprawic, attempt_number, levels(level_number, type, module_id, modules(day_number, title))');
+      .select('level_id, score, co_poprawic, attempt_number, prompt_used, levels(level_number, type, code, module_id, modules(day_number, title))');
 
     return Response.json({ battles: battles || [] });
   } catch (err) {

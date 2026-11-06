@@ -3,7 +3,8 @@ import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
 import { LEVEL_SELECT, applyPass, battlePassed, passMarkFor } from '@/lib/progress-server';
 import { copyBlock } from '@/lib/similarity';
 
-function levelXpFor({ score, zone, bonus, xpReward, bonusXp }) {
+function levelXpFor({ score, zone, bonus, xpReward, bonusXp, quiz }) {
+  if (quiz) return Math.max(0, score);
   if (zone) {
     return zone === 'green' ? xpReward + (bonus ? bonusXp : 0) : 0;
   }
@@ -58,6 +59,7 @@ export async function POST(req) {
     const levelXp = levelXpFor({
       score, zone: validZone, bonus: !!bonus,
       xpReward: level.xp_reward, bonusXp: level.config?.bonus?.xp || 0,
+      quiz: !!level.config?.quiz,
     });
     // XP tylko za poprawę własnego rekordu — powtórki nie nabijają rankingu
     const xpGained = Math.max(0, levelXp - previousXp);

@@ -6,8 +6,8 @@ import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
 import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName, bypassesLocks } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, zoneBossLine, ZONES } from '@/components/ExercisePanels';
-import { AI_UNAVAILABLE, MAX_FOLLOW_UPS, chatEnabled, hasQuestions } from '@/lib/conversation';
+import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, QuizPanel, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { AI_UNAVAILABLE, MAX_FOLLOW_UPS, chatEnabled, hasQuestions, previewTurns } from '@/lib/conversation';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
@@ -133,6 +133,7 @@ export default function BattlePage() {
   const [copyNotice, setCopyNotice] = useState(null);
   const [aiNotice, setAiNotice] = useState(null);
   const [conv, setConv] = useState(null);
+  const [quizNonce, setQuizNonce] = useState(0);
 
   const textareaRef = useRef(null);
   const sideScrollRef = useRef(null);
@@ -285,6 +286,7 @@ export default function BattlePage() {
   async function handleAttack() {
     if (evaluating) return;
     if (level?.type === 'blind_test') { handleBlindSubmit(); return; }
+    if (level?.config?.quiz) return;
     if (!prompt.trim()) return;
 
     setEvalStage(0);
@@ -346,7 +348,7 @@ export default function BattlePage() {
     animateAndSave(data);
   }
 
-  async function animateAndSave(data, save = true) {
+  async function animateAndSave(data, save = true, promptUsed) {
     if (data.error) return;
     const score = data.score;
     const zoneMode = data.mode === 'zones';
@@ -370,12 +372,37 @@ export default function BattlePage() {
     setTimeout(() => setAttackEffect(null), 1000);
     if (!save) return;
 
-    const error = await saveBattle(data);
+    const error = await saveBattle(data, promptUsed);
     if (error) setResult(r => ({ ...r, error: true, co_poprawic: error }));
   }
 
+  async function finishQuiz(answers) {
+    if (evaluating) return;
+    setEvaluating(true);
+    const questions = level?.config?.quiz?.questions || [];
+    const key = questions.map(q => q.correct);
+    const correct = answers.filter((a, i) => a === key[i]).length;
+    const promptUsed = JSON.stringify({ quiz: true, answers, key });
+    setPrompt(promptUsed);
+    const data = {
+      mode: 'quiz',
+      score: correct * 10,
+      zone: null,
+      bonus: false,
+      co_poszlo_dobrze: `Poprawnych odpowiedzi: ${correct} z ${questions.length}.`,
+      co_poprawic: correct === questions.length ? null : 'Możesz wrócić do pytań, które poszły słabiej.',
+      wskazowka: 'Po każdym pytaniu widać, która odpowiedź była poprawna.',
+    };
+    setResult(data);
+    try {
+      await animateAndSave(data, true, promptUsed);
+    } finally {
+      setEvaluating(false);
+    }
+  }
+
   // Zwraca komunikat błędu albo null, gdy próba została zapisana
-  async function saveBattle(data) {
+  async function saveBattle(data, promptUsed) {
     const res = await fetch('/api/battle/complete', {
       method: 'POST',
       headers: apiHeaders(),
@@ -384,7 +411,7 @@ export default function BattlePage() {
         score: data.score, zone: data.zone || null, bonus: !!data.bonus,
         co_poszlo_dobrze: data.co_poszlo_dobrze,
         co_poprawic: data.co_poprawic, wskazowka: data.wskazowka,
-        promptUsed: level.type === 'blind_test' ? `blind:${blindAnswer}` : prompt,
+        promptUsed: promptUsed ?? (level.type === 'blind_test' ? `blind:${blindAnswer}` : prompt),
       }),
     });
     const savedData = await res.json();
@@ -508,6 +535,7 @@ export default function BattlePage() {
     setResult(null);
     setSaved(null);
     setBlindAnswer(null);
+    setQuizNonce(n => n + 1);
     setLibraryState(null);
     if (newPrompt !== undefined) setPrompt(newPrompt);
     setTimeout(() => textareaRef.current?.focus(), 50);
@@ -583,6 +611,7 @@ export default function BattlePage() {
   const wordCount = prompt.trim() ? prompt.trim().split(/\s+/).length : 0;
   const cfg = level?.config;
   const zoneMode = !!cfg?.zones;
+  const quizMode = !!cfg?.quiz;
   const livesEnabled = module?.lives_enabled !== false;
   const id = parseInt(levelId);
   const chatMode = zoneMode && chatEnabled(cfg, module?.day_number) && !!result?.aiResponse && !result.error && !result.redZoneDetected?.length;
@@ -602,7 +631,7 @@ export default function BattlePage() {
   const nextLocked = isLevelLocked(nextLevel);
   const xpGained = saved?.xpGained;
   const redZoneHits = zoneMode && !result ? detectRedZone(prompt, cfg.red_terms) : [];
-  const passMark = zoneMode ? 90 : 40;
+  const passMark = quizMode ? 0 : zoneMode ? 90 : 40;
   const passedHere = level ? isPassed(level, bestScores, completedVia) : false;
   const failedAttempts = passedHere ? 0 : (attempts[id] ?? 0);
   const showExample = zoneMode && !passedHere && failedAttempts >= EXAMPLE_AFTER && !!cfg.other_example;
@@ -615,7 +644,8 @@ export default function BattlePage() {
   const relatedLevel = cfg?.related_code ? moduleLevels.find(l => l.code === cfg.related_code) : null;
   const relatedPrompt = relatedLevel ? modulePrompts[relatedLevel.id] : null;
   // Dzień 2 dzieli się na nazwane moduły — licznik pokazuje postęp w module bieżącego zadania
-  const counterLevels = cfg?.block_name ? moduleLevels.filter(l => (l.block || 1) === (level.block || 1)) : moduleLevels;
+  const counterLevels = (cfg?.block_name ? moduleLevels.filter(l => (l.block || 1) === (level.block || 1)) : moduleLevels)
+    .filter(l => !l.extra && !l.config?.extra);
   const chips = [...PROMPT_BLOCKS, ...(cfg?.chips || []).map(c => ({ key: c.label, label: c.label, text: c.text }))];
 
   return (
@@ -726,7 +756,7 @@ export default function BattlePage() {
                 if (isCurrent) { dotBg = 'var(--accent)'; dotBorder = 'var(--accent)'; dotColor = '#fff'; dotShadow = '0 0 10px rgba(79,142,247,0.8)'; }
                 else if (isPerfect) { dotBg = 'var(--green)'; dotBorder = 'var(--green)'; dotColor = '#0a0a1a'; }
                 else if (isDone) { dotBg = '#5c4a12'; dotBorder = 'var(--gold)'; dotColor = 'var(--gold)'; }
-                const label = lvl.boss ? `👑${lvl.code.replace(/^BOSS\s*/i, '')}` : (lvl.code || lvl.level_number);
+                const label = lvl.extra || lvl.boss ? `★${lvl.code || 'BOSS'}` : (lvl.code || lvl.level_number);
                 return (
                   <div key={lvl.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {prevBlock && prevBlock !== lvl.block && <span style={{ width: 1, height: 18, background: 'var(--border)', marginRight: 4 }} />}
@@ -779,12 +809,12 @@ export default function BattlePage() {
               fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: typeColor, background: 'rgba(10,10,26,0.9)',
               border: `1px solid ${typeColor}`, padding: '5px 9px', borderRadius: 2, flexShrink: 0,
             }}>
-              {zoneMode
-                ? <>{cfg.boss ? '👑 ' : ''}{exerciseLabel.toUpperCase()}</>
+              {zoneMode || quizMode
+                ? <>{cfg.extra ? '★ DLA CHĘTNYCH · ' : cfg.boss ? '👑 ' : ''}{exerciseLabel.toUpperCase()}</>
                 : <>ZADANIE {level?.level_number}/{module?.total_levels} · {level?.type === 'solo' ? '⚡ SOLO' : level?.type === 'fix_prompt' ? '🔧 NAPRAW PROMPT' : '👁 ZGADNIJ AI'}</>}
             </span>
             <span style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)', lineHeight: 1.4 }}>
-              {zoneMode ? (
+              {zoneMode || quizMode ? (
                 <>
                   {cfg.difficulty ? <>{'⭐'.repeat(cfg.difficulty)} · </> : null}
                   {cfg.duration ? <>⏱ {cfg.duration} · </> : null}
@@ -796,7 +826,7 @@ export default function BattlePage() {
                 : <>Do zdobycia: <span style={{ color: 'var(--gold)' }}>{level?.xp_reward} XP</span></>}
             </span>
           </div>
-          {zoneMode && (
+          {(zoneMode || quizMode) && (
             <h1 className="battle-title">
               {cfg.department ? `${cfg.department} · ` : ''}{level.title}
             </h1>
@@ -815,13 +845,13 @@ export default function BattlePage() {
             <PassedAttempt
               zone={savedZones[id]}
               score={bestScores[id]}
-              prompt={level.type === 'blind_test' ? null : modulePrompts[id]}
+              prompt={level.type === 'blind_test' || quizMode ? null : modulePrompts[id]}
               feedback={savedFeedback[id]}
               via={completedVia[id]}
             />
           )}
 
-          {zoneMode ? (
+          {zoneMode || quizMode ? (
             <ExerciseBrief level={level} relatedPrompt={relatedPrompt} onInsert={(t) => { setPrompt(t); setTimeout(() => textareaRef.current?.focus(), 0); }} />
           ) : (
             <div className="battle-steps" style={{ background: 'rgba(15,12,36,0.97)', border: '2px solid rgba(79,142,247,0.5)', borderRadius: 4, padding: '12px 14px', flexShrink: 0 }}>
@@ -852,7 +882,16 @@ export default function BattlePage() {
             <BlindTestInput options={blindOptions} blindAnswer={blindAnswer} setBlindAnswer={setBlindAnswer} disabled={evaluating} />
           )}
 
-          {!result && !zoneMode && level?.type !== 'blind_test' && (
+          {quizMode && (
+            <QuizPanel
+              key={`${id}-${quizNonce}`}
+              questions={cfg.quiz.questions}
+              onFinish={finishQuiz}
+              saving={evaluating}
+            />
+          )}
+
+          {!result && !zoneMode && !quizMode && level?.type !== 'blind_test' && (
             <div>
               <SectionLabel color="var(--muted)">🧱 KLOCKI DOBREGO PROMPTA — KLIKNIJ, ABY WSTAWIĆ</SectionLabel>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -876,6 +915,11 @@ export default function BattlePage() {
                 title={cfg.system_test ? 'TEST: ODPOWIEDŹ TWOJEGO ASYSTENTA' : 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM'}
                 description="Tak AI odpowiedziało na Twój prompt. Jeśli zadało pytania, możesz na nie odpowiedzieć."
                 messages={[
+                  ...previewTurns(cfg).map(m => ({
+                    from: m.role === 'assistant' ? 'ai' : 'me',
+                    label: m.label ? (m.role === 'assistant' ? `🤖 ${m.label}` : `👤 ${m.label}`) : undefined,
+                    text: m.content,
+                  })),
                   cfg.system_test
                     ? { from: 'me', label: '👤 Klient napisał', text: cfg.system_test.message }
                     : { from: 'me', text: prompt },
@@ -906,7 +950,7 @@ export default function BattlePage() {
         </div>
 
         {/* ---------- POLE PROMPTU (przyklejone na dole) ---------- */}
-        {!result && (
+        {!result && !quizMode && (
           <div className="battle-composer">
             {lastAttempt && level?.type !== 'blind_test' && (
               <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 600, color: 'var(--muted)', lineHeight: 1.4 }}>
@@ -975,17 +1019,17 @@ export default function BattlePage() {
 
         {result && (
           <div className="battle-actions">
-            {!overlay && !awaitingReply && ((zoneMode ? !(result.zone === 'green' && result.bonus) : result.score < 70) || result.error) && (
+            {!overlay && !awaitingReply && ((zoneMode ? !(result.zone === 'green' && result.bonus) : quizMode ? false : result.score < 70) || result.error) && (
               <button onClick={() => retry()} className="pixel-button" style={{ fontSize: 11, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
                 {level?.type === 'blind_test' ? '🔄 JESZCZE RAZ' : zoneMode && result.zone === 'green' ? '⭐ POWALCZ O BONUS' : zoneMode ? '✏️ NOWA PRÓBA' : '✏️ POPRAW PROMPT'}
               </button>
             )}
-            {nextLevel && !nextLocked && !replyRequired && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
+            {nextLevel && !nextLocked && !replyRequired && (zoneMode ? result.zone === 'green' || skipState?.done : quizMode || result.score >= 40) && !result.error && (
               <button onClick={() => router.push(`/battle/${nextLevel.id}`)} className="pixel-button btn-primary" style={{ fontSize: 11, padding: '12px 8px' }}>
                 {nextLevel.code ? `DALEJ: ${nextLevel.label || nextLevel.code} ▶` : 'NASTĘPNE ▶'}
               </button>
             )}
-            {nextLevel && !awaitingReply && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' || skipState?.done : result.score >= 40) && !result.error && (
+            {nextLevel && !awaitingReply && lockReason(nextLevel) === 'block' && (zoneMode ? result.zone === 'green' || skipState?.done : quizMode || result.score >= 40) && !result.error && (
               <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center' }}>
                 🔒 {nextLevel.label || nextLevel.code || 'Następne'} odblokuje trener
               </div>
@@ -1150,7 +1194,7 @@ export default function BattlePage() {
                 </div>
               )}
 
-              {level?.type !== 'blind_test' && prompt && !chatMode && (
+              {level?.type !== 'blind_test' && prompt && !chatMode && !quizMode && (
                 <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 4, padding: '0 12px' }}>
                   <summary className="fold-summary" style={{ fontFamily: "'Rajdhani'", fontSize: 18, fontWeight: 700, lineHeight: 1.4, color: 'var(--muted)', cursor: 'pointer' }}>Twój prompt</summary>
                   <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, marginBottom: 10, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
