@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Markdown from '@/components/Markdown';
+import { TOOLS, FREE_ACCOUNT_NOTE, toolLabel } from '@/lib/tools';
 
 const PIXEL = "'Press Start 2P'";
 const TEXT = "'Rajdhani'";
@@ -52,7 +53,7 @@ function Heading({ color, children }) {
   return <div style={{ ...large, fontWeight: 700, color, marginBottom: 8 }}>{children}</div>;
 }
 
-async function copyText(text) {
+export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -536,10 +537,28 @@ function xpForTries(n) {
   return 0;
 }
 
+// Zła odpowiedź miga na czerwono przez sekundę (quiz Dnia 3, wybór narzędzia i lista kontrolna Dnia 4)
+function useFlash() {
+  const [flash, setFlash] = useState(null);
+  useEffect(() => {
+    if (!flash) return undefined;
+    const t = setTimeout(() => setFlash(cur => (cur === flash ? null : cur)), 1000);
+    return () => clearTimeout(t);
+  }, [flash]);
+  return [flash, setFlash];
+}
+
+function choiceStyle({ flash, wrong, green }) {
+  if (flash) return { borderColor: 'var(--red)', color: '#ffd0d0', background: 'rgba(247,79,79,0.45)', opacity: 1 };
+  if (wrong) return { borderColor: 'rgba(247,79,79,0.35)', color: 'var(--muted)', background: 'transparent', opacity: 0.45 };
+  if (green) return { borderColor: 'var(--green)', color: 'var(--green)', background: 'rgba(79,247,160,0.12)', opacity: 1 };
+  return { borderColor: 'var(--border)', color: 'var(--white)', background: 'transparent', opacity: 1 };
+}
+
 export function QuizPanel({ questions, onFinish, saving }) {
   const [index, setIndex] = useState(0);
   const [wrong, setWrong] = useState(() => new Set());
-  const [flash, setFlash] = useState(null);
+  const [flash, setFlash] = useFlash();
   const [ok, setOk] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [first, setFirst] = useState(null);
@@ -548,12 +567,6 @@ export function QuizPanel({ questions, onFinish, saving }) {
   const q = questions[index];
   const firstCorrect = history.filter((row, i) => row.first === questions[i].correct).length;
   const totalXp = history.reduce((sum, row) => sum + row.xp, 0);
-
-  useEffect(() => {
-    if (!flash) return undefined;
-    const t = setTimeout(() => setFlash(cur => (cur === flash ? null : cur)), 1000);
-    return () => clearTimeout(t);
-  }, [flash]);
 
   function choose(key) {
     if (saving || ok || wrong.has(key) || flash) return;
@@ -610,23 +623,6 @@ export function QuizPanel({ questions, onFinish, saving }) {
           const isWrong = wrong.has(k);
           const isFlash = flash === k;
           const isGreen = ok && k === q.correct;
-          let border = 'var(--border)';
-          let color = 'var(--white)';
-          let background = 'transparent';
-          let opacity = 1;
-          if (isFlash) {
-            border = 'var(--red)';
-            color = '#ffd0d0';
-            background = 'rgba(247,79,79,0.45)';
-          } else if (isWrong) {
-            border = 'rgba(247,79,79,0.35)';
-            color = 'var(--muted)';
-            opacity = 0.45;
-          } else if (isGreen) {
-            border = 'var(--green)';
-            color = 'var(--green)';
-            background = 'rgba(79,247,160,0.12)';
-          }
           return (
             <button
               key={k}
@@ -636,7 +632,7 @@ export function QuizPanel({ questions, onFinish, saving }) {
               className="chip-button"
               style={{
                 justifyContent: 'flex-start', textAlign: 'left', minHeight: 48, fontSize: 17,
-                borderColor: border, color, background, opacity,
+                ...choiceStyle({ flash: isFlash, wrong: isWrong, green: isGreen }),
                 transition: 'background 0.15s ease, opacity 0.2s ease',
               }}
             >
@@ -661,5 +657,272 @@ export function QuizPanel({ questions, onFinish, saving }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/* ===== DZIEŃ 4 · „Narzędzie + polecenie” ===== */
+
+const compact = { fontFamily: TEXT, fontSize: 16, lineHeight: 1.4, fontWeight: 600, color: 'var(--white)', overflowWrap: 'anywhere' };
+
+// Lewa kolumna: zwarta sytuacja, żeby razem z przyciskami i polem mieściła się na 1366×768
+export function ToolBrief({ cfg, goal, task }) {
+  return (
+    <>
+      <Card style={{ padding: '5px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={compact}><b style={{ color: 'var(--accent)' }}>📋 Sytuacja:</b> {cfg.situation}</div>
+        {cfg.blocks?.map((b, i) => (
+          <div
+            key={i}
+            style={b.mail
+              ? { ...compact, fontWeight: 500, fontStyle: 'italic', color: '#f3e3b0', borderLeft: '3px solid var(--gold)', background: 'rgba(247,201,79,0.06)', padding: '4px 10px' }
+              : compact}
+          >
+            {b.title && <b style={{ color: 'var(--gold)' }}>{b.title}: </b>}{b.text}
+          </div>
+        ))}
+      </Card>
+      {(goal || task) && (
+        <section
+          aria-label="Twoje zadanie"
+          style={{ border: '2px solid var(--gold)', borderRadius: 4, background: 'rgba(247,201,79,0.08)', padding: '3px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0 }}
+        >
+          <div style={{ ...compact, fontWeight: 700, color: 'var(--gold)' }}>🎯 Twoje zadanie</div>
+          {goal && <div style={compact}><b style={{ color: 'var(--gold)' }}>Cel:</b> {goal}</div>}
+          {task && <div style={compact}><b style={{ color: 'var(--gold)' }}>Co zrobić:</b> {task}</div>}
+        </section>
+      )}
+    </>
+  );
+}
+
+const stepTitle = { fontFamily: TEXT, fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--gold)' };
+
+// Krok 1: ten sam mechanizm co quiz Dnia 3 — zła odpowiedź miga na czerwono, wyszarza się i pokazuje podpowiedź
+export function ToolPicker({ tool, solved, initialWrong = [], onWrong, onSolve, disabled }) {
+  const [wrong, setWrong] = useState(() => new Set(initialWrong));
+  const [flash, setFlash] = useFlash();
+  const [hint, setHint] = useState(null);
+
+  function choose(id) {
+    if (disabled || solved || wrong.has(id) || flash) return;
+    if (tool.accepted.includes(id)) {
+      onSolve({ tool: id, tries: wrong.size + 1 });
+      return;
+    }
+    const next = new Set(wrong).add(id);
+    setWrong(next);
+    setFlash(id);
+    setHint(tool.hints?.[id] || null);
+    onWrong?.([...next]);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={stepTitle}>Krok 1 · Wybierz narzędzie</div>
+      <div className="tool-grid" role="group" aria-label="Wybierz narzędzie">
+        {TOOLS.map(t => {
+          const isWrong = wrong.has(t.id);
+          const isGreen = solved?.tool === t.id;
+          const look = choiceStyle({ flash: flash === t.id, wrong: isWrong, green: isGreen });
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => choose(t.id)}
+              disabled={disabled || !!solved || isWrong || !!flash}
+              aria-pressed={isGreen}
+              className="chip-button"
+              style={{
+                ...look,
+                opacity: solved && !isGreen ? 0.45 : look.opacity,
+                transition: 'background 0.15s ease, opacity 0.2s ease',
+              }}
+            >
+              {isGreen ? '✓ ' : ''}{t.label}
+            </button>
+          );
+        })}
+      </div>
+      {!solved && hint && (
+        <div role="alert" style={{ ...compact, color: '#ffb0b0' }}>✗ {hint}</div>
+      )}
+      {solved && (
+        <div style={{ ...compact, color: '#b9f5d6' }}><b style={{ color: 'var(--green)' }}>✓ Dlaczego:</b> {tool.why}</div>
+      )}
+    </div>
+  );
+}
+
+export function FreeAccountBar() {
+  return (
+    <div role="note" style={{ ...compact, fontWeight: 700, color: '#ffd8a8', background: 'rgba(247,150,79,0.12)', border: '1px solid #f7964f', borderRadius: 4, padding: '6px 10px' }}>
+      ⚠ {FREE_ACCOUNT_NOTE}
+    </div>
+  );
+}
+
+// 4.2, krok 2: wybór wielokrotny; złe zaznaczenia migają na czerwono jak w quizie
+export function ToolChecks({ checks, onDone, saving, done }) {
+  const [selected, setSelected] = useState(() => new Set());
+  const [tries, setTries] = useState(0);
+  const [flash, setFlash] = useFlash();
+  const [hint, setHint] = useState(false);
+
+  function toggle(i) {
+    if (saving || done || flash) return;
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  }
+
+  function check() {
+    if (!selected.size || saving || done || flash) return;
+    const n = tries + 1;
+    setTries(n);
+    if (checks.options.every((o, i) => o.correct === selected.has(i))) {
+      setHint(false);
+      onDone(n);
+      return;
+    }
+    setHint(true);
+    const wrongPicked = [...selected].filter(i => !checks.options[i].correct);
+    if (wrongPicked.length) setFlash(wrongPicked);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={stepTitle}>Krok 2 · {checks.question}</div>
+      <div className="tool-checks" role="group" aria-label={checks.question}>
+        {checks.options.map((o, i) => {
+          const isFlash = Array.isArray(flash) && flash.includes(i);
+          const isGreen = done && o.correct;
+          const on = done ? o.correct : selected.has(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              onClick={() => toggle(i)}
+              disabled={saving || done}
+              className="chip-button"
+              style={{
+                justifyContent: 'flex-start', textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center',
+                ...choiceStyle({ flash: isFlash, green: isGreen }),
+                ...(on && !isFlash && !isGreen ? { borderColor: 'var(--accent)', background: 'rgba(79,142,247,0.18)' } : {}),
+                opacity: done && !o.correct ? 0.45 : 1,
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 18, flexShrink: 0 }}>{on ? '☑' : '☐'}</span>
+              <span>{o.text}</span>
+            </button>
+          );
+        })}
+      </div>
+      {hint && !done && <div role="alert" style={{ ...compact, color: '#ffb0b0' }}>✗ {checks.hint}</div>}
+      {!done && (
+        <button onClick={check} disabled={saving || !selected.size || !!flash} className="pixel-button btn-primary attack-button">
+          {saving ? 'ZAPISUJĘ…' : '✔ SPRAWDŹ'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Prawa kolumna przed oceną: elementy dobrego polecenia (jak lista „Nie zapomnij o” w Dniu 2)
+export function ToolCriteria({ criteria }) {
+  return (
+    <Card className="battle-remember" color="rgba(79,247,160,0.6)" background="rgba(8,30,22,0.96)" style={{ borderWidth: 2 }}>
+      <Heading color="var(--green)">✅ Co ma zawierać polecenie</Heading>
+      <Bullets items={criteria.map((c, i) => `${i + 1}) ${c}`)} marker="" style={large} />
+      <div style={{ ...body, color: 'var(--muted)', marginTop: 8 }}>Zielona: co najmniej 2 z 3. Żółta: 1.</div>
+    </Card>
+  );
+}
+
+const TOOL_ZONE_SUB = {
+  green: 'zaliczone',
+  yellow: 'zaliczone — dopisz brakującą rzecz i wejdź na zieloną',
+  red: 'niezaliczone — popraw polecenie',
+};
+
+// Prawa kolumna po ocenie: strefa, XP z obu kroków, podpowiedź i podgląd odpowiedzi narzędzia
+export function ToolResult({ result, criteria, saved, lastZone }) {
+  const z = ZONES[result.zone] || ZONES.yellow;
+  const xpGained = saved?.xpGained;
+  return (
+    <>
+      <div style={{
+        background: 'rgba(10,8,28,0.96)', border: `2px solid ${z.color}`, borderRadius: 4, padding: '14px 16px',
+        boxShadow: `0 0 24px ${z.color}33`, animation: 'pop-in 0.35s cubic-bezier(.34,1.56,.64,1)', flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontFamily: PIXEL, fontSize: 14, color: z.color, lineHeight: 1.4 }}>{z.icon} {z.label}</div>
+            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>{TOOL_ZONE_SUB[result.zone]}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: PIXEL, fontSize: 12, lineHeight: 1.5, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
+              {!saved ? '…' : xpGained > 0 ? `+${xpGained} XP` : '+0 XP'}
+            </div>
+            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>
+              Krok 1: {result.step1} · Krok 2: {result.step2} = {result.score} XP
+            </div>
+            {saved?.practice && !xpGained && <div style={{ ...body, color: 'var(--muted)' }}>liczy się najlepsza ocena</div>}
+          </div>
+        </div>
+        {lastZone && ZONES[lastZone] && (
+          <div style={{ ...body, color: 'var(--muted)', marginTop: 8 }}>
+            Poprzednio: <span style={{ color: ZONES[lastZone].color }}>{ZONES[lastZone].label.toLowerCase()}</span> → teraz: <span style={{ color: z.color }}>{z.label.toLowerCase()}</span>
+          </div>
+        )}
+        {result.co_poprawic && (
+          <div style={{ ...large, marginTop: 10, color: result.zone === 'green' ? '#cfd3ff' : '#f3e3b0' }}>
+            {result.zone === 'green' ? '💡 Można jeszcze: ' : '👉 Podpowiedź: '}{result.co_poprawic}
+          </div>
+        )}
+      </div>
+
+      {result.redZoneDetected?.length > 0 && (
+        <Card color="var(--red)" background="rgba(247,79,79,0.1)">
+          <Label color="var(--red)">🚫 POLECENIE NIE ZOSTAŁO WYSŁANE</Label>
+          <div style={body}>W poleceniu są dane, które nie mogą trafić do darmowego narzędzia: <b style={{ color: '#ff9999' }}>{result.redZoneDetected.join(', ')}</b>.</div>
+        </Card>
+      )}
+
+      {result.co_poszlo_dobrze && (
+        <Card color="rgba(79,247,160,0.4)" background="rgba(10,10,26,0.95)">
+          <Label color="var(--green)">✅ CO POSZŁO DOBRZE</Label>
+          <div style={body}>{result.co_poszlo_dobrze}</div>
+        </Card>
+      )}
+
+      {criteria?.length > 0 && !result.redZoneDetected?.length && (
+        <Card color="rgba(255,255,255,0.12)" background="rgba(10,10,26,0.95)">
+          <Label>📋 CO MA ZAWIERAĆ POLECENIE</Label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {criteria.map((c, i) => {
+              const ok = result.spelnione?.includes(i + 1);
+              return (
+                <div key={i} style={{ ...body, display: 'flex', gap: 8, color: ok ? 'var(--white)' : '#ffc4c4' }}>
+                  <span style={{ flexShrink: 0, color: ok ? 'var(--green)' : 'var(--red)' }}>{ok ? '✓' : '✗'}</span>
+                  <span>{c}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {result.aiResponse && (
+        <Card color="rgba(79,142,247,0.35)" background="rgba(10,10,26,0.95)">
+          <Label color="var(--accent)">🤖 PODGLĄD: CO {toolLabel(result.tool).toUpperCase()} MNIEJ WIĘCEJ BY ODPOWIEDZIAŁ</Label>
+          <div style={{ ...body, color: 'var(--muted)', marginTop: -4, marginBottom: 8 }}>To symulacja. Ocena dotyczy Twojego polecenia.</div>
+          <Markdown text={result.aiResponse} />
+        </Card>
+      )}
+    </>
   );
 }

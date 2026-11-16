@@ -2,9 +2,12 @@ import { getServiceClient } from '@/lib/supabase';
 import { guardLevelAccess, sessionPlayerId } from '@/lib/session';
 import { LEVEL_SELECT, applyPass, battlePassed, passMarkFor } from '@/lib/progress-server';
 import { copyBlock } from '@/lib/similarity';
+import { withBestPrompt } from '@/lib/tools';
 
-function levelXpFor({ score, zone, bonus, xpReward, bonusXp, quiz }) {
+function levelXpFor({ score, zone, bonus, xpReward, bonusXp, quiz, tool }) {
   if (quiz) return Math.max(0, score);
+  // Dzień 4: wynik = XP kroku 1 + XP kroku 2
+  if (tool) return Math.max(0, Math.min(xpReward, score));
   if (zone) {
     return zone === 'green' ? xpReward + (bonus ? bonusXp : 0) : 0;
   }
@@ -47,7 +50,7 @@ export async function POST(req) {
 
     const { data: existingBattle } = await supabase
       .from('battles')
-      .select('id, attempt_number, score, xp_earned, completed_via')
+      .select('id, attempt_number, score, xp_earned, completed_via, prompt_used')
       .eq('player_id', playerId)
       .eq('level_id', levelId)
       .maybeSingle();
@@ -60,14 +63,18 @@ export async function POST(req) {
       score, zone: validZone, bonus: !!bonus,
       xpReward: level.xp_reward, bonusXp: level.config?.bonus?.xp || 0,
       quiz: !!level.config?.quiz,
+      tool: !!level.config?.tool,
     });
     // XP tylko za poprawę własnego rekordu — powtórki nie nabijają rankingu
     const xpGained = Math.max(0, levelXp - previousXp);
+    const storedPrompt = level.config?.tool
+      ? withBestPrompt(promptUsed, validZone, existingBattle?.prompt_used)
+      : promptUsed;
 
     const battleData = {
       player_id: playerId,
       level_id: levelId,
-      prompt_used: promptUsed,
+      prompt_used: storedPrompt,
       score,
       zone: validZone,
       bonus: !!bonus,
@@ -85,7 +92,9 @@ export async function POST(req) {
     } else if (score >= previousBest) {
       await supabase.from('battles').update(battleData).eq('id', existingBattle.id);
     } else {
-      await supabase.from('battles').update({ attempt_number: attemptNumber }).eq('id', existingBattle.id);
+      // Dzień 4: ostatnia próba wraca do pola po odświeżeniu, a best podąża za najlepiej ocenionym poleceniem
+      const lastPrompt = level.config?.tool ? { prompt_used: storedPrompt } : {};
+      await supabase.from('battles').update({ attempt_number: attemptNumber, ...lastPrompt }).eq('id', existingBattle.id);
     }
 
     const base = { success: true, xpGained, previousBest, attemptNumber, livesEnabled };
@@ -101,7 +110,12 @@ export async function POST(req) {
 
     if (!passed) {
       if (!livesEnabled) {
-        return Response.json({ ...base, newTotalXp: player.total_xp, newLives: player.current_lives });
+        // Dzień 4: XP za trafione narzędzie liczy się także przy czerwonym poleceniu
+        const newTotalXp = player.total_xp + (level.config?.tool ? xpGained : 0);
+        if (newTotalXp !== player.total_xp) {
+          await supabase.from('players').update({ total_xp: newTotalXp }).eq('id', playerId);
+        }
+        return Response.json({ ...base, newTotalXp, newLives: player.current_lives });
       }
 
       const newLives = Math.max(0, player.current_lives - 1);

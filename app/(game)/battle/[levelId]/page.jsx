@@ -6,8 +6,9 @@ import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
 import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName, bypassesLocks } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, QuizPanel, zoneBossLine, ZONES } from '@/components/ExercisePanels';
+import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, QuizPanel, zoneBossLine, ZONES, ToolBrief, ToolPicker, ToolChecks, FreeAccountBar, ToolCriteria, ToolResult } from '@/components/ExercisePanels';
 import { AI_UNAVAILABLE, MAX_FOLLOW_UPS, chatEnabled, hasQuestions, previewTurns } from '@/lib/conversation';
+import { FREE_TOOL_RED_TERMS, checksXp, isFreeTool, parseToolAttempt, toolLabel, toolXpForTries } from '@/lib/tools';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
@@ -39,6 +40,27 @@ function rememberConversation(levelId, prompt, result) {
 
 function forgetConversation(levelId) {
   try { localStorage.removeItem(conversationKey(levelId)); } catch {}
+}
+
+// Dzień 4: wynik kroku 1 (złe wybory i trafione narzędzie) przeżywa odświeżenie strony przed zapisem kroku 2
+function toolKey(levelId) {
+  return `pq_tool_${sessionStorage.getItem('playerId')}_${levelId}`;
+}
+
+function readToolProgress(levelId) {
+  try { return JSON.parse(localStorage.getItem(toolKey(levelId)) || 'null'); } catch { return null; }
+}
+
+function rememberToolProgress(levelId, progress) {
+  try { localStorage.setItem(toolKey(levelId), JSON.stringify(progress)); } catch {}
+}
+
+const TOOL_FX_SCORE = { green: 90, yellow: 55, red: 20 };
+
+function toolBossLine(zone) {
+  if (zone === 'green') return 'Świetnie! Z takim poleceniem to narzędzie zrobi, co trzeba.';
+  if (zone === 'yellow') return 'Blisko! Dopisz jedną rzecz i będzie zielono.';
+  return 'Stop — w takiej wersji to nie przejdzie. Zobacz podpowiedź i popraw polecenie.';
 }
 
 const EXAMPLE_AFTER = 3;
@@ -134,6 +156,8 @@ export default function BattlePage() {
   const [aiNotice, setAiNotice] = useState(null);
   const [conv, setConv] = useState(null);
   const [quizNonce, setQuizNonce] = useState(0);
+  const [toolPick, setToolPick] = useState(null);
+  const [toolWrong, setToolWrong] = useState([]);
 
   const textareaRef = useRef(null);
   const sideScrollRef = useRef(null);
@@ -207,6 +231,8 @@ export default function BattlePage() {
     setCopyNotice(null);
     setAiNotice(null);
     setConv(null);
+    setToolPick(null);
+    setToolWrong([]);
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -253,6 +279,14 @@ export default function BattlePage() {
     setSavedZones(scoresData.zones || {});
     setCompletedVia(scoresData.completedVia || {});
 
+    if (levelData.config?.tool) {
+      const savedAttempt = parseToolAttempt(scoresData.prompts?.[levelData.id]);
+      const local = readToolProgress(levelData.id);
+      setToolPick(savedAttempt ? { tool: savedAttempt.tool, tries: savedAttempt.tool_tries || 1 } : local?.solved || null);
+      setToolWrong(local?.wrong || []);
+      if (savedAttempt?.prompt) setPrompt(savedAttempt.prompt);
+    }
+
     if (freshPlayer) {
       const playerData = freshPlayer;
       setPlayer(playerData);
@@ -287,8 +321,11 @@ export default function BattlePage() {
     if (evaluating) return;
     if (level?.type === 'blind_test') { handleBlindSubmit(); return; }
     if (level?.config?.quiz) return;
+    const tool = level?.config?.tool;
+    if (tool && (!toolPick || tool.checks)) return;
     if (!prompt.trim()) return;
 
+    if (tool && result && !result.error) setLastAttempt({ score: result.score, zone: result.zone });
     setEvalStage(0);
     setTipIndex(i => (i + 1) % LOADING_TIPS.length);
     setDisplayScore(0);
@@ -303,13 +340,20 @@ export default function BattlePage() {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId) }),
+        body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId), tool: toolPick?.tool }),
       });
       const data = await res.json().catch(() => ({ code: 'ai_unavailable' }));
       if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
       if (data.code === 'too_similar') { setCopyNotice(data); return; }
       if (data.code === 'ai_unavailable') { setAiNotice(data.error || AI_UNAVAILABLE); return; }
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
+      if (tool) {
+        const step1 = toolXpForTries(toolPick.tries);
+        const full = { ...data, step1, step2: data.score, score: step1 + data.score };
+        setResult(full);
+        await animateAndSave(full, true, JSON.stringify({ tool: toolPick.tool, tool_tries: toolPick.tries, prompt }));
+        return;
+      }
       setResult(data);
       // Zielona w kroku 1 rozmowy: zaliczenie i próba zapisują się dopiero po odpowiedzi AI w kroku 2
       if (data.conversation?.awaitingReply) {
@@ -321,6 +365,7 @@ export default function BattlePage() {
       await animateAndSave(data);
     } catch (err) {
       if (level?.config?.conversation) { setAiNotice(AI_UNAVAILABLE); return; }
+      if (tool) { setAiNotice(err.message || AI_UNAVAILABLE); return; }
       setResult({ score: 0, error: true, co_poszlo_dobrze: '—', co_poprawic: err.message, wskazowka: 'Sprawdź połączenie i spróbuj ponownie — ta próba nie została zapisana.' });
     } finally {
       setEvaluating(false);
@@ -350,8 +395,8 @@ export default function BattlePage() {
 
   async function animateAndSave(data, save = true, promptUsed) {
     if (data.error) return;
-    const score = data.score;
-    const zoneMode = data.mode === 'zones';
+    const score = data.mode === 'tool' ? TOOL_FX_SCORE[data.zone] : data.score;
+    const zoneMode = data.mode === 'zones' || data.mode === 'tool';
     if (score >= 70) {
       setAttackEffect('hit');
       setFloatingText(zoneMode ? '✅' : `⚡ ${score}`);
@@ -406,6 +451,36 @@ export default function BattlePage() {
     }
   }
 
+  function solveTool(pick) {
+    setToolPick(pick);
+    rememberToolProgress(id, { wrong: toolWrong, solved: pick });
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  }
+
+  function rememberToolWrong(wrong) {
+    setToolWrong(wrong);
+    rememberToolProgress(id, { wrong, solved: null });
+  }
+
+  // 4.2: krok 2 to lista kontrolna, bez oceny modelu
+  async function finishChecks(tries) {
+    if (evaluating || !toolPick) return;
+    setEvaluating(true);
+    const step1 = toolXpForTries(toolPick.tries);
+    const step2 = checksXp(cfg.tool.checks, tries);
+    const data = {
+      mode: 'tool', tool: toolPick.tool, zone: 'green', step1, step2, score: step1 + step2, spelnione: [],
+      co_poszlo_dobrze: tries <= 1 ? 'Wszystkie 3 trafione za pierwszym razem.' : 'Wszystkie 3 trafione.',
+      co_poprawic: null, wskazowka: null,
+    };
+    setResult(data);
+    try {
+      await animateAndSave(data, true, JSON.stringify({ tool: toolPick.tool, tool_tries: toolPick.tries, checks_tries: tries }));
+    } finally {
+      setEvaluating(false);
+    }
+  }
+
   // Zwraca komunikat błędu albo null, gdy próba została zapisana
   async function saveBattle(data, promptUsed) {
     const res = await fetch('/api/battle/complete', {
@@ -428,7 +503,7 @@ export default function BattlePage() {
     if (savedData.previousBest == null || data.score >= savedData.previousBest) {
       setSavedZones(prev => ({ ...prev, [id]: data.zone || null }));
       setSavedFeedback(prev => ({ ...prev, [id]: { co_poszlo_dobrze: data.co_poszlo_dobrze, co_poprawic: data.co_poprawic, wskazowka: data.wskazowka } }));
-      if (level.type !== 'blind_test') setModulePrompts(prev => ({ ...prev, [id]: prompt }));
+      if (level.type !== 'blind_test') setModulePrompts(prev => ({ ...prev, [id]: promptUsed ?? prompt }));
     }
     setBestScores(prev => ({ ...prev, [id]: Math.max(prev[id] ?? 0, data.score) }));
     if (savedData.attemptNumber) setAttempts(prev => ({ ...prev, [id]: savedData.attemptNumber }));
@@ -617,6 +692,8 @@ export default function BattlePage() {
   const cfg = level?.config;
   const zoneMode = !!cfg?.zones;
   const quizMode = !!cfg?.quiz;
+  const toolMode = !!cfg?.tool;
+  const toolChecks = cfg?.tool?.checks || null;
   const livesEnabled = module?.lives_enabled !== false;
   const id = parseInt(levelId);
   const chatMode = zoneMode && chatEnabled(cfg, module?.day_number) && !!result?.aiResponse && !result.error && !result.redZoneDetected?.length;
@@ -631,6 +708,7 @@ export default function BattlePage() {
   const bossLine = evaluating
     ? (evalStage === 0 ? 'Hmm, zobaczmy co AI z tym zrobi…' : 'Czytam uważnie… jeszcze chwilka.')
     : awaitingReply ? 'Dobrze! AI zadało Ci pytania. Odpowiedz mu krótko, kilkoma słowami.'
+    : toolMode ? (result && !result.error ? toolBossLine(result.zone) : !toolPick ? 'Które narzędzie wybierzesz?' : toolChecks ? 'Dobrze! Teraz zaznacz, co sprawdzisz.' : 'Dobrze! Teraz napisz polecenie.')
     : result && !result.error ? (zoneMode ? zoneBossLine(result.zone) : bossReaction(result.score)) : level?.boss_dialogue;
   const nextLevel = getNextLevel();
   const nextLocked = isLevelLocked(nextLevel);
@@ -652,9 +730,16 @@ export default function BattlePage() {
   const counterLevels = (cfg?.block_name ? moduleLevels.filter(l => (l.block || 1) === (level.block || 1)) : moduleLevels)
     .filter(l => !l.extra && !l.config?.extra);
   const chips = [...PROMPT_BLOCKS, ...(cfg?.chips || []).map(c => ({ key: c.label, label: c.label, text: c.text }))];
+  const toolRedHits = toolMode && toolPick && isFreeTool(toolPick.tool) ? detectRedZone(prompt, FREE_TOOL_RED_TERMS) : [];
+  const toolNext = toolMode && passedHere && nextLevel && !nextLocked
+    ? { label: `DALEJ: ${nextLevel.label || nextLevel.code} ▶`, onClick: () => router.push(`/battle/${nextLevel.id}`) }
+    : null;
+  const toolNextByTrainer = toolMode && passedHere && nextLevel && lockReason(nextLevel) === 'block';
+  const myPromptsOpen = toolMode && (bypassesLocks(player?.role) || moduleLevels.some(l => isPassed(l, bestScores, completedVia)));
+  const openMyPrompts = () => router.push(`/my-prompts?moduleId=${level.module_id}`);
 
   return (
-    <div className={`battle-root${zoneMode ? ' is-zone' : ''}${result ? ' has-result' : ''}`} style={{ background: '#0d0d20' }}>
+    <div className={`battle-root${zoneMode ? ' is-zone' : ''}${toolMode ? ' is-tool' : ''}${result ? ' has-result' : ''}`} style={{ background: '#0d0d20' }}>
 
       {roomBg && (
         <img
@@ -688,7 +773,10 @@ export default function BattlePage() {
           <div style={{ fontFamily: "'Rajdhani'", fontSize: 18, color: 'var(--muted)', fontWeight: 600 }}>
             Razem masz {player?.total_xp || 0} XP · {getPlayerLevel(player?.total_xp || 0).emoji} {getPlayerLevel(player?.total_xp || 0).name}
           </div>
-          <button autoFocus onClick={() => { setOverlay(null); setShowConfetti(false); router.push('/map'); }} className="pixel-button btn-gold">🗺 WRÓĆ NA MAPĘ</button>
+          {toolMode && (
+            <button autoFocus onClick={() => { setOverlay(null); setShowConfetti(false); openMyPrompts(); }} className="pixel-button btn-primary">📝 MOJE POLECENIA</button>
+          )}
+          <button autoFocus={!toolMode} onClick={() => { setOverlay(null); setShowConfetti(false); router.push('/map'); }} className="pixel-button btn-gold">🗺 WRÓĆ NA MAPĘ</button>
         </Overlay>
       )}
       {overlay === 'level-up' && (
@@ -791,6 +879,11 @@ export default function BattlePage() {
             >
               📋 {counterLevels.filter(l => isPassed(l, bestScores, completedVia)).length}/{counterLevels.length} {showLevelList ? '▲' : '▼'}
             </button>
+            {myPromptsOpen && (
+              <button onClick={openMyPrompts} className="chip-button" style={{ flexShrink: 0, borderColor: 'var(--green)', color: 'var(--green)' }}>
+                📝 Moje polecenia
+              </button>
+            )}
           </div>
         )}
         {showLevelList && (
@@ -814,12 +907,16 @@ export default function BattlePage() {
               fontFamily: PIXEL, fontSize: 11, lineHeight: 1.5, color: typeColor, background: 'rgba(10,10,26,0.9)',
               border: `1px solid ${typeColor}`, padding: '5px 9px', borderRadius: 2, flexShrink: 0,
             }}>
-              {zoneMode || quizMode
+              {zoneMode || quizMode || toolMode
                 ? <>{cfg.extra ? '★ DLA CHĘTNYCH · ' : cfg.boss ? '👑 ' : ''}{exerciseLabel.toUpperCase()}</>
                 : <>ZADANIE {level?.level_number}/{module?.total_levels} · {level?.type === 'solo' ? '⚡ SOLO' : level?.type === 'fix_prompt' ? '🔧 NAPRAW PROMPT' : '👁 ZGADNIJ AI'}</>}
             </span>
             <span style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)', lineHeight: 1.4 }}>
-              {zoneMode || quizMode ? (
+              {toolMode ? (
+                <>
+                  <span style={{ color: 'var(--white)' }}>{level.title}</span> · <span style={{ color: 'var(--gold)' }}>{level.xp_reward} XP</span>
+                </>
+              ) : zoneMode || quizMode ? (
                 <>
                   {cfg.difficulty ? <>{'⭐'.repeat(cfg.difficulty)} · </> : null}
                   {cfg.duration ? <>⏱ {cfg.duration} · </> : null}
@@ -846,7 +943,7 @@ export default function BattlePage() {
             </div>
           )}
 
-          {!result && passedHere && (
+          {!result && passedHere && !toolMode && (
             <PassedAttempt
               zone={savedZones[id]}
               score={bestScores[id]}
@@ -856,7 +953,9 @@ export default function BattlePage() {
             />
           )}
 
-          {zoneMode || quizMode ? (
+          {toolMode ? (
+            <ToolBrief cfg={cfg} goal={level.goal_description} task={level.task_description} />
+          ) : zoneMode || quizMode ? (
             <ExerciseBrief level={level} relatedPrompt={relatedPrompt} onInsert={(t) => { setPrompt(t); setTimeout(() => textareaRef.current?.focus(), 0); }} />
           ) : (
             <div className="battle-steps" style={{ background: 'rgba(15,12,36,0.97)', border: '2px solid rgba(79,142,247,0.5)', borderRadius: 4, padding: '12px 14px', flexShrink: 0 }}>
@@ -896,7 +995,7 @@ export default function BattlePage() {
             />
           )}
 
-          {!result && !zoneMode && !quizMode && level?.type !== 'blind_test' && (
+          {!result && !zoneMode && !quizMode && !toolMode && level?.type !== 'blind_test' && (
             <div>
               <SectionLabel color="var(--muted)">🧱 KLOCKI DOBREGO PROMPTA — KLIKNIJ, ABY WSTAWIĆ</SectionLabel>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -954,8 +1053,84 @@ export default function BattlePage() {
           )}
         </div>
 
+        {/* ---------- DZIEŃ 4: KROK 1 (NARZĘDZIE) I KROK 2 (POLECENIE) NA JEDNYM EKRANIE ---------- */}
+        {toolMode && (
+          <div className="battle-composer tool-composer">
+            <ToolPicker
+              key={`tool-${id}`}
+              tool={cfg.tool}
+              solved={toolPick}
+              initialWrong={toolWrong}
+              onWrong={rememberToolWrong}
+              onSolve={solveTool}
+              disabled={evaluating}
+            />
+            {toolPick && isFreeTool(toolPick.tool) && <FreeAccountBar />}
+            {toolChecks ? (
+              toolPick && <ToolChecks key={`checks-${id}`} checks={toolChecks} onDone={finishChecks} saving={evaluating} done={passedHere || result?.zone === 'green'} />
+            ) : (
+              <>
+                <label htmlFor="tool-prompt" className="tool-step-title" style={{ opacity: toolPick ? 1 : 0.55 }}>
+                  Krok 2 · Napisz polecenie{toolPick ? ` (${toolLabel(toolPick.tool)})` : ''}
+                </label>
+                {aiNotice && (
+                  <div role="alert" className="tool-note" style={{ color: '#f3e3b0', borderColor: 'var(--gold)' }}>
+                    📡 {aiNotice} Ta próba się nie liczy. Twoje polecenie jest zachowane.
+                  </div>
+                )}
+                {toolRedHits.length > 0 && (
+                  <div role="alert" className="tool-note" style={{ color: '#ffb0b0', borderColor: 'var(--red)' }}>
+                    🚫 To dane, które nie mogą trafić do darmowego narzędzia: {toolRedHits.join(', ')}.
+                  </div>
+                )}
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <textarea
+                    id="tool-prompt"
+                    ref={textareaRef}
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    readOnly={evaluating}
+                    disabled={!toolPick}
+                    placeholder={toolPick ? 'Wpisz tutaj polecenie…' : 'Najpierw wybierz narzędzie (krok 1).'}
+                    rows={3}
+                    className="prompt-input"
+                    style={{ opacity: evaluating || !toolPick ? 0.6 : 1 }}
+                    onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleAttack(); } }}
+                  />
+                  <div style={{ position: 'absolute', right: 14, bottom: 6, fontFamily: "'Rajdhani'", fontSize: 16, fontWeight: 700, color: 'var(--muted)', pointerEvents: 'none' }}>
+                    {wordCount} słów
+                  </div>
+                </div>
+                <div className="tool-actions">
+                  <button
+                    onClick={handleAttack}
+                    disabled={evaluating || !toolPick || !prompt.trim()}
+                    className="pixel-button btn-primary attack-button"
+                  >
+                    {evaluating ? '⏳ SPRAWDZAM…' : result && !result.error ? '✔ SPRAWDŹ POPRAWIONE' : '✔ SPRAWDŹ POLECENIE'}
+                  </button>
+                  {toolNext && !evaluating && (
+                    <button onClick={toolNext.onClick} className="pixel-button attack-button" style={{ background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}>
+                      {toolNext.label}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            {toolChecks && toolNext && (
+              <button onClick={toolNext.onClick} className="pixel-button btn-primary attack-button">{toolNext.label}</button>
+            )}
+            {toolNextByTrainer && (
+              <div className="tool-step-title" style={{ color: 'var(--muted)' }}>🔒 {nextLevel.label || nextLevel.code} odblokuje trener</div>
+            )}
+            {passedHere && !nextLevel && myPromptsOpen && (
+              <button onClick={openMyPrompts} className="pixel-button btn-gold attack-button">📝 MOJE POLECENIA</button>
+            )}
+          </div>
+        )}
+
         {/* ---------- POLE PROMPTU (przyklejone na dole) ---------- */}
-        {!result && !quizMode && (
+        {!result && !quizMode && !toolMode && (
           <div className="battle-composer">
             {lastAttempt && level?.type !== 'blind_test' && (
               <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 600, color: 'var(--muted)', lineHeight: 1.4 }}>
@@ -1022,7 +1197,7 @@ export default function BattlePage() {
           </div>
         )}
 
-        {result && (
+        {result && !toolMode && (
           <div className="battle-actions">
             {!overlay && !awaitingReply && ((zoneMode ? !(result.zone === 'green' && result.bonus) : quizMode ? false : result.score < 70) || result.error) && (
               <button onClick={() => retry()} className="pixel-button" style={{ fontSize: 11, padding: '12px 8px', background: 'var(--bg2)', border: '1px solid var(--accent2)', color: 'var(--accent2)' }}>
@@ -1106,7 +1281,9 @@ export default function BattlePage() {
           {/* ---------- WYNIK ---------- */}
           {result && (
             <div ref={resultRef} className="battle-result">
-              {zoneMode && !result.error ? (
+              {toolMode ? (
+                !result.error && <ToolResult result={result} criteria={cfg.tool.criteria} saved={saved} lastZone={lastAttempt?.zone} />
+              ) : zoneMode && !result.error ? (
                 <>
                   {lastAttempt?.zone && (
                     <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, fontWeight: 700, color: 'var(--muted)' }}>
@@ -1156,7 +1333,7 @@ export default function BattlePage() {
                 </>
               )}
 
-              {result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
+              {!toolMode && result.lepszy_prompt && (!zoneMode || result.zone === 'green') && (
                 <div style={{ background: 'rgba(79,247,160,0.06)', border: '1px dashed var(--green)', borderRadius: 4, padding: '10px 12px' }}>
                   <SectionLabel color="var(--green)">✨ PRZYKŁAD LEPSZEGO PROMPTA</SectionLabel>
                   <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, fontWeight: 500, whiteSpace: 'pre-wrap' }}>
@@ -1169,7 +1346,7 @@ export default function BattlePage() {
                 </div>
               )}
 
-              {result.aiResponse && !chatMode && (
+              {result.aiResponse && !chatMode && !toolMode && (
                 <div style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(79,142,247,0.3)', borderRadius: 4, padding: '10px 12px' }}>
                   <SectionLabel color="var(--accent)">🤖 {level?.type === 'blind_test' ? 'ODPOWIEDŹ' : cfg?.system_test ? 'TEST: ODPOWIEDŹ TWOJEGO ASYSTENTA' : zoneMode ? 'PODGLĄD: CO AI ZROBIŁO Z TWOIM PROMPTEM' : 'CO AI ZROBIŁA Z TWOIM PROMPTEM'}</SectionLabel>
                   {cfg?.system_test && (
@@ -1199,7 +1376,7 @@ export default function BattlePage() {
                 </div>
               )}
 
-              {level?.type !== 'blind_test' && prompt && !chatMode && !quizMode && (
+              {level?.type !== 'blind_test' && prompt && !chatMode && !quizMode && !toolMode && (
                 <details style={{ background: 'rgba(10,10,26,0.95)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 4, padding: '0 12px' }}>
                   <summary className="fold-summary" style={{ fontFamily: "'Rajdhani'", fontSize: 18, fontWeight: 700, lineHeight: 1.4, color: 'var(--muted)', cursor: 'pointer' }}>Twój prompt</summary>
                   <div style={{ fontFamily: "'Rajdhani'", fontSize: 17, color: 'var(--white)', lineHeight: 1.5, marginBottom: 10, whiteSpace: 'pre-wrap', fontWeight: 500 }}>{prompt}</div>
@@ -1233,6 +1410,7 @@ export default function BattlePage() {
           {/* ---------- POMOC ---------- */}
           <div className="battle-help">
             {zoneMode && <ExerciseHelp level={level} />}
+            {toolMode && !toolChecks && toolPick && !result && <ToolCriteria criteria={cfg.tool.criteria} />}
             {canSkip && !result?.error && (
               <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={result ? null : skipNext} />
             )}
