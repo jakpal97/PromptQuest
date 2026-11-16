@@ -665,12 +665,13 @@ export function QuizPanel({ questions, onFinish, saving }) {
 const compact = { fontFamily: TEXT, fontSize: 16, lineHeight: 1.4, fontWeight: 600, color: 'var(--white)', overflowWrap: 'anywhere' };
 
 // Lewa kolumna: zwarta sytuacja, żeby razem z przyciskami i polem mieściła się na 1366×768
+// Bloki z polem turn (np. „Fakty do odpowiedzi” w 4.7) stoją nad polem swojej tury, nie w sytuacji
 export function ToolBrief({ cfg, goal, task }) {
   return (
     <>
       <Card style={{ padding: '5px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={compact}><b style={{ color: 'var(--accent)' }}>📋 Sytuacja:</b> {cfg.situation}</div>
-        {cfg.blocks?.map((b, i) => (
+        {cfg.blocks?.filter(b => !b.turn).map((b, i) => (
           <div
             key={i}
             style={b.mail
@@ -753,6 +754,25 @@ export function ToolPicker({ tool, solved, initialWrong = [], onWrong, onSolve, 
   );
 }
 
+const historyBubble = { ...compact, borderRadius: 10, padding: '4px 10px', maxWidth: '94%' };
+
+// 4.7: zaliczona Tura 1 zostaje nad polem jak historia czatu
+export function TurnHistory({ t1 }) {
+  return (
+    <section aria-label="Historia czatu: Tura 1" className="tool-history">
+      <div style={{ ...historyBubble, alignSelf: 'flex-end', background: 'rgba(79,142,247,0.18)', border: '1px solid rgba(79,142,247,0.55)', borderBottomRightRadius: 3, whiteSpace: 'pre-wrap' }}>
+        <b style={{ color: 'var(--accent)' }}>Ty (Tura 1):</b> {t1.prompt}
+      </div>
+      {t1.preview && (
+        <div style={{ ...historyBubble, alignSelf: 'flex-start', background: 'rgba(79,247,160,0.08)', border: '1px solid rgba(79,247,160,0.45)', borderBottomLeftRadius: 3 }}>
+          <b style={{ color: 'var(--green)' }}>🤖 AI:</b>
+          <Markdown text={t1.preview} style={{ fontSize: 16, lineHeight: 1.4, gap: 4 }} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function FreeAccountBar() {
   return (
     <div role="note" style={{ ...compact, fontWeight: 700, color: '#ffd8a8', background: 'rgba(247,150,79,0.12)', border: '1px solid #f7964f', borderRadius: 4, padding: '6px 10px' }}>
@@ -832,12 +852,12 @@ export function ToolChecks({ checks, onDone, saving, done }) {
 }
 
 // Prawa kolumna przed oceną: elementy dobrego polecenia (jak lista „Nie zapomnij o” w Dniu 2)
-export function ToolCriteria({ criteria }) {
+export function ToolCriteria({ criteria, note, title }) {
   return (
     <Card className="battle-remember" color="rgba(79,247,160,0.6)" background="rgba(8,30,22,0.96)" style={{ borderWidth: 2 }}>
-      <Heading color="var(--green)">✅ Co ma zawierać polecenie</Heading>
-      <Bullets items={criteria.map((c, i) => `${i + 1}) ${c}`)} marker="" style={large} />
-      <div style={{ ...body, color: 'var(--muted)', marginTop: 8 }}>Zielona: co najmniej 2 z 3. Żółta: 1.</div>
+      <Heading color="var(--green)">✅ {title || 'Co ma zawierać polecenie'}</Heading>
+      <Bullets items={criteria.map((c, i) => criteria.length > 1 ? `${i + 1}) ${c}` : c)} marker="" style={large} />
+      <div style={{ ...body, color: 'var(--muted)', marginTop: 8 }}>{note || 'Zielona: co najmniej 2 z 3. Żółta: 1.'}</div>
     </Card>
   );
 }
@@ -848,10 +868,25 @@ const TOOL_ZONE_SUB = {
   red: 'niezaliczone — popraw polecenie',
 };
 
+const TURN1_ZONE_SUB = {
+  green: 'Tura 1 zaliczona — teraz Tura 2 (pole po lewej)',
+  yellow: 'Tura 1 zaliczona — teraz Tura 2 (pole po lewej)',
+  red: 'niezaliczone — popraw polecenie',
+};
+
+function toolXpLine(result) {
+  if (!result.turn) return `Krok 1: ${result.step1} · Krok 2: ${result.step2} = ${result.score} XP`;
+  if (result.turn === 1) return `Krok 1: ${result.step1} · Tura 1: ${result.step2} (doliczę po Turze 2)`;
+  if (result.zone === 'red') return `Krok 1: ${result.step1} · Tura 2: 0 = ${result.score} XP (Tura 1 doliczę po zaliczeniu Tury 2)`;
+  return `Krok 1: ${result.step1} · Tura 1: ${result.t1Xp} · Tura 2: ${result.step2} = ${result.score} XP`;
+}
+
 // Prawa kolumna po ocenie: strefa, XP z obu kroków, podpowiedź i podgląd odpowiedzi narzędzia
-export function ToolResult({ result, criteria, saved, lastZone }) {
+// turn: 4.7 — kryteria, notka pod podglądem i opis strefy z bieżącej tury
+export function ToolResult({ result, criteria, saved, lastZone, turn }) {
   const z = ZONES[result.zone] || ZONES.yellow;
   const xpGained = saved?.xpGained;
+  const turn1Passed = result.turn === 1 && result.zone !== 'red';
   return (
     <>
       <div style={{
@@ -861,15 +896,13 @@ export function ToolResult({ result, criteria, saved, lastZone }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontFamily: PIXEL, fontSize: 14, color: z.color, lineHeight: 1.4 }}>{z.icon} {z.label}</div>
-            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>{TOOL_ZONE_SUB[result.zone]}</div>
+            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>{(result.turn === 1 ? TURN1_ZONE_SUB : TOOL_ZONE_SUB)[result.zone]}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: PIXEL, fontSize: 12, lineHeight: 1.5, color: xpGained > 0 ? 'var(--gold)' : 'var(--muted)' }}>
               {!saved ? '…' : xpGained > 0 ? `+${xpGained} XP` : '+0 XP'}
             </div>
-            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>
-              Krok 1: {result.step1} · Krok 2: {result.step2} = {result.score} XP
-            </div>
+            <div style={{ ...body, color: 'var(--muted)', marginTop: 4 }}>{toolXpLine(result)}</div>
             {saved?.practice && !xpGained && <div style={{ ...body, color: 'var(--muted)' }}>liczy się najlepsza ocena</div>}
           </div>
         </div>
@@ -916,11 +949,20 @@ export function ToolResult({ result, criteria, saved, lastZone }) {
         </Card>
       )}
 
-      {result.aiResponse && (
+      {result.aiResponse && turn1Passed && (
+        <div style={{ ...body, color: 'var(--muted)' }}>🤖 Odpowiedź AI z Tury 1 jest po lewej, w historii czatu nad polem.</div>
+      )}
+
+      {result.aiResponse && !turn1Passed && (
         <Card color="rgba(79,142,247,0.35)" background="rgba(10,10,26,0.95)">
           <Label color="var(--accent)">🤖 PODGLĄD: CO {toolLabel(result.tool).toUpperCase()} MNIEJ WIĘCEJ BY ODPOWIEDZIAŁ</Label>
           <div style={{ ...body, color: 'var(--muted)', marginTop: -4, marginBottom: 8 }}>To symulacja. Ocena dotyczy Twojego polecenia.</div>
           <Markdown text={result.aiResponse} />
+          {turn?.preview_note && (
+            <div style={{ ...large, fontWeight: 700, color: '#f3e3b0', borderLeft: '3px solid var(--gold)', paddingLeft: 10, marginTop: 10 }}>
+              💡 {turn.preview_note}
+            </div>
+          )}
         </Card>
       )}
     </>

@@ -2,9 +2,9 @@ import { getServiceClient } from '@/lib/supabase';
 import { sessionPlayerId } from '@/lib/session';
 import { battlePassed } from '@/lib/progress-server';
 import { bypassesLocks } from '@/lib/progress';
-import { parseToolAttempt, toolLabel } from '@/lib/tools';
+import { bestPrompts, parseToolAttempt, toolLabel } from '@/lib/tools';
 
-// „Moje polecenia” (Dzień 4): najlepiej ocenione (zielone/żółte) polecenie z każdego zadania; ekran otwiera się po pierwszym zaliczonym zadaniu
+// „Moje polecenia” (Dzień 4): najlepiej ocenione (zielone/żółte) polecenie z każdego zadania (4.7: z każdej tury); ekran otwiera się po pierwszym zaliczonym zadaniu
 export async function GET(req) {
   try {
     const playerId = await sessionPlayerId();
@@ -33,12 +33,15 @@ export async function GET(req) {
 
     const items = toolLevels
       .filter(l => !l.config.tool.checks)
-      .map(l => {
-        const best = parseToolAttempt(byLevel[l.id]?.prompt_used)?.best;
-        if (!best?.prompt) return null;
-        return { levelId: l.id, code: l.code, title: l.title, tool: toolLabel(best.tool), zone: best.zone, prompt: best.prompt };
-      })
-      .filter(Boolean);
+      .flatMap(l => bestPrompts(parseToolAttempt(byLevel[l.id]?.prompt_used)).map(best => ({
+        key: `${l.id}-${best.turn || 0}`,
+        levelId: l.id,
+        code: l.code,
+        title: best.turn ? `${l.title} · Tura ${best.turn}` : l.title,
+        tool: toolLabel(best.tool),
+        zone: best.zone,
+        prompt: best.prompt,
+      })));
 
     return Response.json({ unlocked: true, done, total: toolLevels.length, moduleTitle, items });
   } catch (err) {

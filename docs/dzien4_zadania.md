@@ -19,9 +19,9 @@
 - Krok 1: 30 / 20 / 10 (pierwsza, druga, kolejna próba).
 - Krok 2: zielona 70, żółta 50, czerwona 0. Uczestnik może poprawiać polecenie i liczy się najlepsza ocena.
 
-**Ekran „Moje polecenia”** pojawia się po ukończeniu wszystkich zadań i jest dostępny z menu modułu:
+**Ekran „Moje polecenia”** jest dostępny od pierwszego zaliczonego zadania:
 
-- lista ostatnich ocenionych poleceń uczestnika z zadań 4.1 i 4.3–4.8, każde z nazwą sytuacji i narzędzia,
+- najlepiej ocenione polecenie uczestnika z zadań 4.1 i 4.3–4.8 (zielone przed żółtym, przy remisie najnowsze; czerwonych nie ma), każde z nazwą sytuacji i narzędzia; w 4.7 osobno Tura 1 i Tura 2,
 - przycisk „Kopiuj” przy każdym poleceniu i przycisk „Kopiuj wszystkie”,
 - nagłówek: „Twoja ściąga. Te polecenia możesz używać od jutra.”
 
@@ -31,7 +31,7 @@ Czcionka co najmniej 16 px. Sytuacja, przyciski i pole polecenia mieszczą się 
 
 - ZIELONA: są co najmniej 2 z 3 elementów z „Co ma zawierać” i polecenie pasuje do sytuacji.
 - ŻÓŁTA: jest 1 element. Podpowiedź mówi, czego dopisać.
-- CZERWONA tylko gdy: mniej niż 5 słów, inny temat albo dane, które nie powinny trafić do darmowego narzędzia (nazwisko klienta, numer zamówienia w zadaniu z darmowym narzędziem).
+- CZERWONA tylko gdy: mniej niż 3 słowa (w 4.7, Tura 2: mniej niż 2), inny temat albo dane, które nie powinny trafić do darmowego narzędzia (nazwisko klienta, numer zamówienia w zadaniu z darmowym narzędziem).
 - Oceniaj SENS, nie słowa. Literówki i synonimy się liczą. Przy wątpliwości wybieraj wyższą strefę.
 
 ## Zasada podglądu dla modelu (wspólna)
@@ -149,17 +149,34 @@ Trener odblokowuje zadania w panelu admina w 3 grupach: 4.1–4.3 | 4.4–4.6 | 
 
 „Sehr geehrte Damen und Herren, am 28. Oktober haben wir die Bestellung 2026/1187 aufgegeben. Laut Bestätigung sollte die Lieferung in KW 46 kommen. Die Woche ist fast vorbei und wir haben keine Information. Außerdem brauchen unsere Mitarbeiter eine Anleitung auf Deutsch. Bitte nennen Sie uns den neuen Liefertermin. Mit freundlichen Grüßen, Markus Weber, Weber GmbH, Leipzig“
 
-**Fakty do odpowiedzi:** nowy termin dostawy to tydzień 48 (23–27 listopada 2026), instrukcję po niemiecku wyślemy w piątek.
 **Poprawne narzędzie:** Copilot w Outlooku. Akceptuj też Copilot Chat.
 **Dlaczego:** Mail jest w Outlooku, więc Copilot przy mailu od razu go widzi. Dane klienta zostają na koncie firmowym.
 **Podpowiedzi przy złym wyborze:**
 
 - Perplexity / NotebookLM / Nano Banana / ElevenLabs: „W mailu jest nazwisko klienta i numer zamówienia. Tylko Copilot na koncie firmowym.”
 
-**Co ma zawierać polecenie:** 1) streszczenie po polsku albo prośba o odpowiedź po niemiecku; 2) fakty: tydzień 48 i instrukcja w piątek; 3) ton (uprzejmie, krótko) albo prośba o tłumaczenie zwrotne na polski do sprawdzenia.
-**Uwaga dla oceny:** Brak faktów → ŻÓŁTA z podpowiedzią „Podaj nowy termin, inaczej AI go wymyśli.”
-**Instrukcja podglądu:** Napisz krótką odpowiedź po niemiecku (3–4 zdania) z faktami podanymi w poleceniu, a pod nią jedno zdanie po polsku: co jest w odpowiedzi. Użyj tylko faktów z sytuacji.
-**Wzorzec:** Streść ten mail po polsku w 3 punktach. Potem napisz uprzejmą odpowiedź po niemiecku: nowy termin dostawy to tydzień 48 (23–27 listopada), instrukcję po niemiecku wyślemy w piątek. Na końcu przetłumacz odpowiedź na polski, żebym mógł ją sprawdzić.
+**Krok 2 to rozmowa w dwóch turach, jak w czacie.** Krok 1 (wybór narzędzia) bez zmian.
+
+**Krok 2 · Tura 1: „Najpierw dowiedz się, czego chce klient.”**
+
+- ZIELONA: prośba o tłumaczenie albo streszczenie po polsku (dowolne słowa).
+- ŻÓŁTA: tylko ogólne pytanie, np. „co to jest?”. Podpowiedź: „Poproś wprost o tłumaczenie albo streszczenie po polsku.”
+- CZERWONA: według wspólnych zasad.
+- **Podgląd:** dymek AI z polskim streszczeniem maila w 3 punktach, tylko z treści maila: 1) zamówienie 2026/1187 z 28 października, dostawa miała być w KW 46 i nie ma informacji; 2) potrzebna instrukcja po niemiecku; 3) prośba o nowy termin.
+- Po ocenie zielonej albo żółtej odblokowuje się Tura 2. Polecenie i podgląd z Tury 1 zostają widoczne nad polem, jak historia czatu.
+- **Wzorzec:** Przetłumacz ten mail na polski i streść go w 3 punktach.
+
+**Krok 2 · Tura 2: „Teraz poproś o odpowiedź do klienta.”**
+
+- **Fakty do odpowiedzi** (widoczne dopiero w tej turze): nowy termin dostawy to tydzień 48 (23–27 listopada 2026), instrukcję po niemiecku wyślemy w piątek.
+- **Co ma zawierać polecenie:** 1) odpowiedź po niemiecku; 2) fakty: tydzień 48 i instrukcja w piątek; 3) ton (uprzejmie, krótko) albo prośba o tłumaczenie na polski do sprawdzenia. Zielona: 2 z 3.
+- **Uwaga dla oceny:** Brak faktów → ŻÓŁTA z podpowiedzią „Podaj nowy termin, inaczej AI go wymyśli.” Nie wymagaj powtarzania maila ani kontekstu: „odpisz mu” jest w porządku, bo czat pamięta Turę 1. Minimum to 2 słowa.
+- **Podgląd:** odpowiedź po niemiecku (3–4 zdania) tylko z podanych faktów i jedno zdanie po polsku, co w niej jest. Pod podglądem stała notka: „Zauważ: nie wklejałeś maila drugi raz. Czat pamięta, o czym rozmawiacie.”
+- **Wzorzec:** Odpisz mu uprzejmie i krótko po niemiecku: nowy termin dostawy to tydzień 48 (23–27 listopada), instrukcję po niemiecku wyślemy w piątek. Przetłumacz odpowiedź na polski, żebym mógł ją sprawdzić.
+
+**XP 4.7 (razem 100):** krok 1: 30 / 20 / 10; Tura 1: zielona 30, żółta 20; Tura 2: zielona 40, żółta 30; czerwona 0. XP za Turę 1 dolicza się razem z zieloną albo żółtą Turą 2, bo zadanie zalicza dopiero Tura 2 (próg 40). Sama Tura 1 nie może zaliczyć zadania.
+
+**Moje polecenia:** dla 4.7 dwa wpisy, „Tura 1” i „Tura 2”, każdy z najlepiej ocenionym poleceniem z tej tury.
 
 ## 4.8 · Notatka z zebrania
 
@@ -189,5 +206,5 @@ Dwie linie: „Cel:” i „Co zrobić:”. Czcionka jak sytuacja, wyraźna ramk
 - **4.4** Cel: szef potrzebuje pewnej, aktualnej kwoty do budżetu. Co zrobić: wybierz narzędzie, które znajdzie aktualną informację, i zapytaj tak, żeby podało źródło.
 - **4.5** Cel: odpowiedzieć klientowi bez czytania 40 stron. Co zrobić: wybierz narzędzie, które odpowie na podstawie instrukcji, i zapytaj tak, żeby pokazało, gdzie to jest.
 - **4.6** Cel: szef ma jutro dostać listę kar z umowy. Co zrobić: zastanów się, gdzie wolno wgrać firmową umowę, i napisz, co AI ma z niej wypisać.
-- **4.7** Cel: zrozumieć mail i odpisać klientowi po niemiecku, nawet jeśli nie znasz niemieckiego. Co zrobić: wybierz narzędzie i poproś o streszczenie po polsku oraz odpowiedź z podanymi faktami.
+- **4.7** Cel: zrozumieć mail od klienta i odpisać mu po niemiecku, nawet jeśli nie znasz niemieckiego. Co zrobić: wybierz narzędzie, najpierw poproś o polskie streszczenie, a potem o odpowiedź.
 - **4.8** Cel: zamienić odręczną notatkę w tabelę zadań dla zespołu. Co zrobić: wybierz narzędzie, które czyta zdjęcia, i napisz, jak ma wyglądać tabela i co zrobić z nieczytelnym imieniem.

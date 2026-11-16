@@ -6,9 +6,9 @@ import { getPlayerLevel } from '@/lib/auth';
 import { detectRedZone } from '@/lib/redZone';
 import { isPassed, lockReasonOf, lockMessageOf, nextPlayableLevel, levelName, bypassesLocks } from '@/lib/progress';
 import Character from '@/components/Character';
-import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, QuizPanel, zoneBossLine, ZONES, ToolBrief, ToolPicker, ToolChecks, FreeAccountBar, ToolCriteria, ToolResult } from '@/components/ExercisePanels';
+import { ExerciseBrief, ExerciseHelp, ZoneResult, ReferencePrompt, RevealAfterPass, RedZoneBanner, OtherExample, SkipOffer, ConversationChat, QuizPanel, zoneBossLine, ZONES, ToolBrief, ToolPicker, ToolChecks, FreeAccountBar, ToolCriteria, ToolResult, TurnHistory } from '@/components/ExercisePanels';
 import { AI_UNAVAILABLE, MAX_FOLLOW_UPS, chatEnabled, hasQuestions, previewTurns } from '@/lib/conversation';
-import { FREE_TOOL_RED_TERMS, checksXp, isFreeTool, parseToolAttempt, toolLabel, toolXpForTries } from '@/lib/tools';
+import { FREE_TOOL_RED_TERMS, checksXp, isFreeTool, parseToolAttempt, toolLabel, toolXpForTries, turnConfig, turnPassed, turnXp, turnsScore } from '@/lib/tools';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'X-Player-Id': sessionStorage.getItem('playerId') || '' };
@@ -57,7 +57,8 @@ function rememberToolProgress(levelId, progress) {
 
 const TOOL_FX_SCORE = { green: 90, yellow: 55, red: 20 };
 
-function toolBossLine(zone) {
+function toolBossLine(zone, turn) {
+  if (turn === 1 && zone !== 'red') return 'Dobrze! Teraz poproś o odpowiedź do klienta.';
   if (zone === 'green') return 'Świetnie! Z takim poleceniem to narzędzie zrobi, co trzeba.';
   if (zone === 'yellow') return 'Blisko! Dopisz jedną rzecz i będzie zielono.';
   return 'Stop — w takiej wersji to nie przejdzie. Zobacz podpowiedź i popraw polecenie.';
@@ -158,6 +159,7 @@ export default function BattlePage() {
   const [quizNonce, setQuizNonce] = useState(0);
   const [toolPick, setToolPick] = useState(null);
   const [toolWrong, setToolWrong] = useState([]);
+  const [toolT1, setToolT1] = useState(null);
 
   const textareaRef = useRef(null);
   const sideScrollRef = useRef(null);
@@ -233,6 +235,7 @@ export default function BattlePage() {
     setConv(null);
     setToolPick(null);
     setToolWrong([]);
+    setToolT1(null);
 
     const playerId = sessionStorage.getItem('playerId');
     if (!playerId) { router.push('/login'); return; }
@@ -284,7 +287,9 @@ export default function BattlePage() {
       const local = readToolProgress(levelData.id);
       setToolPick(savedAttempt ? { tool: savedAttempt.tool, tries: savedAttempt.tool_tries || 1 } : local?.solved || null);
       setToolWrong(local?.wrong || []);
-      if (savedAttempt?.prompt) setPrompt(savedAttempt.prompt);
+      const t1 = levelData.config.tool.turns && turnPassed(savedAttempt?.t1?.zone) ? savedAttempt.t1 : null;
+      setToolT1(t1);
+      if (savedAttempt?.prompt && (!t1 || savedAttempt.turn === 2)) setPrompt(savedAttempt.prompt);
     }
 
     if (freshPlayer) {
@@ -325,7 +330,7 @@ export default function BattlePage() {
     if (tool && (!toolPick || tool.checks)) return;
     if (!prompt.trim()) return;
 
-    if (tool && result && !result.error) setLastAttempt({ score: result.score, zone: result.zone });
+    if (tool) setLastAttempt(result && !result.error && (result.turn ?? null) === toolTurn ? { score: result.score, zone: result.zone } : null);
     setEvalStage(0);
     setTipIndex(i => (i + 1) % LOADING_TIPS.length);
     setDisplayScore(0);
@@ -340,7 +345,7 @@ export default function BattlePage() {
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId), tool: toolPick?.tool }),
+        body: JSON.stringify({ userPrompt: prompt, levelId: parseInt(levelId), tool: toolPick?.tool, turn: toolTurn }),
       });
       const data = await res.json().catch(() => ({ code: 'ai_unavailable' }));
       if (res.status === 401 || data.code === 'session_mismatch') { expireSession(data.error); return; }
@@ -349,9 +354,20 @@ export default function BattlePage() {
       if (!res.ok) throw new Error(data.error || 'Błąd oceny');
       if (tool) {
         const step1 = toolXpForTries(toolPick.tries);
-        const full = { ...data, step1, step2: data.score, score: step1 + data.score };
+        const attempt = { tool: toolPick.tool, tool_tries: toolPick.tries };
+        // 4.7, Tura 1: zapis bez strefy i z samym XP kroku 1 — zadanie zalicza dopiero Tura 2
+        if (data.turn === 1) {
+          const t1 = { prompt, zone: data.zone, preview: data.aiResponse };
+          const full = { ...data, step1, step2: data.score, score: step1, saveZone: null };
+          setResult(full);
+          const error = await animateAndSave(full, true, JSON.stringify({ ...attempt, turn: 1, prompt, t1 }));
+          if (!error && turnPassed(data.zone)) { setToolT1(t1); setPrompt(''); }
+          return;
+        }
+        const score = data.turn === 2 ? turnsScore(cfg, step1, toolT1?.zone, data.zone) : step1 + data.score;
+        const full = { ...data, step1, step2: data.score, t1Xp: data.turn === 2 ? turnXp(cfg, 1, toolT1?.zone) : null, score };
         setResult(full);
-        await animateAndSave(full, true, JSON.stringify({ tool: toolPick.tool, tool_tries: toolPick.tries, prompt }));
+        await animateAndSave(full, true, JSON.stringify({ ...attempt, ...(data.turn && { turn: data.turn }), prompt }));
         return;
       }
       setResult(data);
@@ -415,10 +431,11 @@ export default function BattlePage() {
       setTimeout(() => { setShakeTarget(null); setFloatingText(null); }, 900);
     }
     setTimeout(() => setAttackEffect(null), 1000);
-    if (!save) return;
+    if (!save) return null;
 
     const error = await saveBattle(data, promptUsed);
     if (error) setResult(r => ({ ...r, error: true, co_poprawic: error }));
+    return error;
   }
 
   async function finishQuiz(history) {
@@ -488,7 +505,7 @@ export default function BattlePage() {
       headers: apiHeaders(),
       body: JSON.stringify({
         levelId: parseInt(levelId),
-        score: data.score, zone: data.zone || null, bonus: !!data.bonus,
+        score: data.score, zone: ('saveZone' in data ? data.saveZone : data.zone) || null, bonus: !!data.bonus,
         co_poszlo_dobrze: data.co_poszlo_dobrze,
         co_poprawic: data.co_poprawic, wskazowka: data.wskazowka,
         promptUsed: promptUsed ?? (level.type === 'blind_test' ? `blind:${blindAnswer}` : prompt),
@@ -694,6 +711,8 @@ export default function BattlePage() {
   const quizMode = !!cfg?.quiz;
   const toolMode = !!cfg?.tool;
   const toolChecks = cfg?.tool?.checks || null;
+  const toolTurn = cfg?.tool?.turns ? (toolT1 ? 2 : 1) : null;
+  const turnCfg = toolMode ? turnConfig(cfg, toolTurn || 1) : null;
   const livesEnabled = module?.lives_enabled !== false;
   const id = parseInt(levelId);
   const chatMode = zoneMode && chatEnabled(cfg, module?.day_number) && !!result?.aiResponse && !result.error && !result.redZoneDetected?.length;
@@ -708,7 +727,7 @@ export default function BattlePage() {
   const bossLine = evaluating
     ? (evalStage === 0 ? 'Hmm, zobaczmy co AI z tym zrobi…' : 'Czytam uważnie… jeszcze chwilka.')
     : awaitingReply ? 'Dobrze! AI zadało Ci pytania. Odpowiedz mu krótko, kilkoma słowami.'
-    : toolMode ? (result && !result.error ? toolBossLine(result.zone) : !toolPick ? 'Które narzędzie wybierzesz?' : toolChecks ? 'Dobrze! Teraz zaznacz, co sprawdzisz.' : 'Dobrze! Teraz napisz polecenie.')
+    : toolMode ? (result && !result.error ? toolBossLine(result.zone, result.turn) : !toolPick ? 'Które narzędzie wybierzesz?' : toolChecks ? 'Dobrze! Teraz zaznacz, co sprawdzisz.' : toolTurn === 2 ? 'Dobrze! Teraz poproś o odpowiedź do klienta.' : 'Dobrze! Teraz napisz polecenie.')
     : result && !result.error ? (zoneMode ? zoneBossLine(result.zone) : bossReaction(result.score)) : level?.boss_dialogue;
   const nextLevel = getNextLevel();
   const nextLocked = isLevelLocked(nextLevel);
@@ -1070,9 +1089,17 @@ export default function BattlePage() {
               toolPick && <ToolChecks key={`checks-${id}`} checks={toolChecks} onDone={finishChecks} saving={evaluating} done={passedHere || result?.zone === 'green'} />
             ) : (
               <>
+                {toolT1 && <TurnHistory t1={toolT1} />}
                 <label htmlFor="tool-prompt" className="tool-step-title" style={{ opacity: toolPick ? 1 : 0.55 }}>
-                  Krok 2 · Napisz polecenie{toolPick ? ` (${toolLabel(toolPick.tool)})` : ''}
+                  {toolTurn
+                    ? `Krok 2 · Tura ${toolTurn}: ${turnCfg.title}`
+                    : `Krok 2 · Napisz polecenie${toolPick ? ` (${toolLabel(toolPick.tool)})` : ''}`}
                 </label>
+                {(cfg.blocks || []).filter(b => b.turn && toolTurn >= b.turn).map((b, i) => (
+                  <div key={i} className="tool-note" style={{ color: 'var(--white)', borderColor: 'var(--gold)', background: 'rgba(247,201,79,0.08)' }}>
+                    <b style={{ color: 'var(--gold)' }}>📝 {b.title}:</b> {b.text}
+                  </div>
+                ))}
                 {aiNotice && (
                   <div role="alert" className="tool-note" style={{ color: '#f3e3b0', borderColor: 'var(--gold)' }}>
                     📡 {aiNotice} Ta próba się nie liczy. Twoje polecenie jest zachowane.
@@ -1091,7 +1118,7 @@ export default function BattlePage() {
                     onChange={e => setPrompt(e.target.value)}
                     readOnly={evaluating}
                     disabled={!toolPick}
-                    placeholder={toolPick ? 'Wpisz tutaj polecenie…' : 'Najpierw wybierz narzędzie (krok 1).'}
+                    placeholder={!toolPick ? 'Najpierw wybierz narzędzie (krok 1).' : toolTurn === 2 ? 'Napisz kolejną wiadomość w tym czacie…' : 'Wpisz tutaj polecenie…'}
                     rows={3}
                     className="prompt-input"
                     style={{ opacity: evaluating || !toolPick ? 0.6 : 1 }}
@@ -1107,7 +1134,7 @@ export default function BattlePage() {
                     disabled={evaluating || !toolPick || !prompt.trim()}
                     className="pixel-button btn-primary attack-button"
                   >
-                    {evaluating ? '⏳ SPRAWDZAM…' : result && !result.error ? '✔ SPRAWDŹ POPRAWIONE' : '✔ SPRAWDŹ POLECENIE'}
+                    {evaluating ? '⏳ SPRAWDZAM…' : result && !result.error && (result.turn ?? null) === toolTurn ? '✔ SPRAWDŹ POPRAWIONE' : '✔ SPRAWDŹ POLECENIE'}
                   </button>
                   {toolNext && !evaluating && (
                     <button onClick={toolNext.onClick} className="pixel-button attack-button" style={{ background: 'var(--bg2)', border: '1px solid var(--green)', color: 'var(--green)' }}>
@@ -1282,7 +1309,15 @@ export default function BattlePage() {
           {result && (
             <div ref={resultRef} className="battle-result">
               {toolMode ? (
-                !result.error && <ToolResult result={result} criteria={cfg.tool.criteria} saved={saved} lastZone={lastAttempt?.zone} />
+                !result.error && (
+                  <ToolResult
+                    result={result}
+                    criteria={turnConfig(cfg, result.turn || 1)?.criteria}
+                    turn={result.turn ? turnConfig(cfg, result.turn) : null}
+                    saved={saved}
+                    lastZone={lastAttempt?.zone}
+                  />
+                )
               ) : zoneMode && !result.error ? (
                 <>
                   {lastAttempt?.zone && (
@@ -1410,7 +1445,13 @@ export default function BattlePage() {
           {/* ---------- POMOC ---------- */}
           <div className="battle-help">
             {zoneMode && <ExerciseHelp level={level} />}
-            {toolMode && !toolChecks && toolPick && !result && <ToolCriteria criteria={cfg.tool.criteria} />}
+            {toolMode && !toolChecks && toolPick && !result && (
+              <ToolCriteria
+                criteria={turnCfg.criteria}
+                note={turnCfg.criteria_note}
+                title={toolTurn ? `Tura ${toolTurn}: co ma zawierać polecenie` : null}
+              />
+            )}
             {canSkip && !result?.error && (
               <SkipOffer attempts={failedAttempts} xpReward={level.xp_reward} state={skipState} onSkip={skipWithReference} next={result ? null : skipNext} />
             )}

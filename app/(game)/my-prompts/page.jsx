@@ -92,15 +92,15 @@ function MyPrompts() {
         )}
 
         {items.map(item => (
-          <section key={item.levelId} style={{ background: 'rgba(10,10,26,0.95)', border: '2px solid var(--border)', borderRadius: 4, padding: '14px 16px' }}>
+          <section key={item.key} style={{ background: 'rgba(10,10,26,0.95)', border: '2px solid var(--border)', borderRadius: 4, padding: '14px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, minWidth: 0 }}>
                 <span style={{ fontFamily: PIXEL, fontSize: 11, color: 'var(--bg)', background: 'var(--gold)', padding: '4px 6px' }}>{item.code}</span>
                 <h2 style={{ margin: 0, fontFamily: TEXT, fontSize: 20, fontWeight: 700, color: 'var(--white)' }}>{item.title}</h2>
                 <span style={{ fontFamily: TEXT, fontSize: 17, fontWeight: 700, color: 'var(--accent)' }}>· {item.tool}</span>
               </div>
-              <button onClick={() => copy(item.levelId, item.prompt)} className="chip-button" style={{ borderColor: 'var(--green)', color: 'var(--green)', fontSize: 16 }}>
-                {copied === item.levelId ? '✓ Skopiowano' : '📋 Kopiuj'}
+              <button onClick={() => copy(item.key, item.prompt)} className="chip-button" style={{ borderColor: 'var(--green)', color: 'var(--green)', fontSize: 16 }}>
+                {copied === item.key ? '✓ Skopiowano' : '📋 Kopiuj'}
               </button>
             </div>
             <div style={{
